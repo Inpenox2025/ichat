@@ -881,13 +881,15 @@ async function handleIncomingMessage(data) {
   // 0. Handle Chat Request Accepted signal
   if (data.type === 'request-accepted') {
     const partner = data.sender;
-    let chatItem = state.chats.find(c => c.username === partner);
+    let chatItem = state.chats.find(c => c && c.username === partner);
     if (chatItem) {
       chatItem.status = 'accepted';
       saveStateToLocalStorage();
+      switchSidebarTab('home');
       renderChatList();
       renderRequestsList();
       renderActiveChat();
+      showToast(`@${partner} accepted your message request!`, 'success');
     }
     return;
   }
@@ -1044,17 +1046,29 @@ function handleAckReceipt(data) {
   }
 }
 
+let typingClearTimeout = null;
+const onlineToastTracker = new Set();
+
 function handleIncomingTyping(data) {
   const { sender, status } = data;
+
   if (state.activeChatPartner === sender) {
     const typingEl = document.getElementById('chatTitleTypingText');
     const statusEl = document.getElementById('chatTitleStatusText');
-    if (status) {
-      typingEl.style.display = 'inline';
-      statusEl.style.display = 'none';
-    } else {
-      typingEl.style.display = 'none';
-      statusEl.style.display = 'inline';
+    if (typingEl && statusEl) {
+      if (status) {
+        typingEl.style.display = 'inline';
+        statusEl.style.display = 'none';
+        clearTimeout(typingClearTimeout);
+        typingClearTimeout = setTimeout(() => {
+          typingEl.style.display = 'none';
+          statusEl.style.display = 'inline';
+        }, 3500);
+      } else {
+        clearTimeout(typingClearTimeout);
+        typingEl.style.display = 'none';
+        statusEl.style.display = 'inline';
+      }
     }
   }
 }
@@ -1063,9 +1077,14 @@ function handleIncomingTyping(data) {
 function updateContactStatusesUI() {
   const statusEl = document.getElementById('chatTitleStatusText');
   if (state.activeChatPartner && statusEl) {
-    // In this simple architecture, we assume online if connected, or rely on active ping
     statusEl.className = 'status-online';
-    statusEl.innerText = 'Active Secure Session';
+    statusEl.innerText = 'Online • Encrypted Session';
+    
+    // Show online status toast once when starting conversation
+    if (!onlineToastTracker.has(state.activeChatPartner)) {
+      onlineToastTracker.add(state.activeChatPartner);
+      showToast(`@${state.activeChatPartner} is online`, 'info');
+    }
   }
 }
 
@@ -1734,9 +1753,11 @@ async function acceptChatRequest(partnerUsername) {
       }
     }
 
+    switchSidebarTab('home');
     renderChatList();
     renderRequestsList();
     renderActiveChat();
+    showToast(`Accepted message request from @${partnerUsername}`, 'success');
   }
 }
 
@@ -1752,6 +1773,7 @@ function declineChatRequest(partnerUsername) {
   }
   
   saveStateToLocalStorage();
+  switchSidebarTab('home');
   renderChatList();
   renderRequestsList();
   renderActiveChat();
@@ -2638,6 +2660,30 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       triggerSendText();
+    }
+  });
+
+  // Real-time Typing Status Broadcaster (emits typing-start / typing-stop)
+  textInput.addEventListener('input', () => {
+    if (!state.activeChatPartner) return;
+    const text = textInput.value;
+
+    if (text.length > 0) {
+      if (!state.isTyping) {
+        state.isTyping = true;
+        sendTypingIndicator(state.activeChatPartner, true);
+      }
+      clearTimeout(state.typingTimer);
+      state.typingTimer = setTimeout(() => {
+        state.isTyping = false;
+        sendTypingIndicator(state.activeChatPartner, false);
+      }, 2500);
+    } else {
+      if (state.isTyping) {
+        clearTimeout(state.typingTimer);
+        state.isTyping = false;
+        sendTypingIndicator(state.activeChatPartner, false);
+      }
     }
   });
 
