@@ -1032,16 +1032,23 @@ function sendReadAcknowledgement(messageId, senderOfMessage) {
   }
 }
 
+const readToastTracker = new Set();
+
 function handleAckReceipt(data) {
   const { messageId, status } = data;
   const msgIndex = state.messages.findIndex(m => m.id === messageId);
   if (msgIndex !== -1) {
-    // Only upgrade status (don't downgrade read -> delivered)
-    const currentStatus = state.messages[msgIndex].status;
+    const msg = state.messages[msgIndex];
+    const currentStatus = msg.status;
     if (status === 'read' || (status === 'delivered' && currentStatus !== 'read')) {
-      state.messages[msgIndex].status = status;
+      msg.status = status;
       saveStateToLocalStorage();
       renderActiveChat();
+
+      if (status === 'read' && !readToastTracker.has(messageId)) {
+        readToastTracker.add(messageId);
+        showToast(`@${msg.chatPartner} read your message`, 'info');
+      }
     }
   }
 }
@@ -1730,9 +1737,19 @@ function renderDeviceConflictList(email, code, devices) {
 
 // Accept incoming chat request
 async function acceptChatRequest(partnerUsername) {
-  let chatItem = state.chats.find(c => c.username === partnerUsername);
+  let chatItem = state.chats.find(c => c && c.username === partnerUsername);
   if (chatItem) {
     chatItem.status = 'accepted';
+    chatItem.unreadCount = 0;
+
+    // Mark incoming messages as read and send read receipts
+    state.messages.forEach(m => {
+      if (m.chatPartner === partnerUsername && m.sender !== state.user.username && m.status !== 'read') {
+        m.status = 'read';
+        sendReadAcknowledgement(m.id, partnerUsername);
+      }
+    });
+
     saveStateToLocalStorage();
 
     // Send request-accepted signal to initiator

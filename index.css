@@ -1092,21 +1092,58 @@ h1, h2, h3, h4, h5, h6 {
   text-transform: uppercase;
 }
 
-/* WhatsApp checkmarks */
+/* Checkmarks (Sent / Delivered / Read Status Ticks) */
 .tick-wrapper {
   display: inline-flex;
   align-items: center;
 }
+
 .tick-wrapper svg {
   width: 13px;
   height: 13px;
   stroke: var(--text-muted);
+  transition: stroke 0.2s ease;
 }
+
+.tick-wrapper.pending svg {
+  stroke: var(--text-muted);
+  opacity: 0.6;
+}
+
+.tick-wrapper.sent svg {
+  stroke: var(--text-muted);
+}
+
 .tick-wrapper.delivered svg {
   stroke: var(--text-secondary);
 }
+
 .tick-wrapper.read svg {
-  stroke: hsl(190, 100%, 45%); /* Sky blue double check */
+  stroke: #38BDF8 !important; /* Electric Blue Read Status */
+  filter: drop-shadow(0 0 2px rgba(56, 189, 248, 0.4));
+}
+
+/* High-contrast checkmarks inside Outgoing Accent Message Bubbles */
+.message-wrapper.outgoing .tick-wrapper svg {
+  stroke: rgba(15, 23, 42, 0.55);
+}
+
+.message-wrapper.outgoing .tick-wrapper.sent svg {
+  stroke: rgba(15, 23, 42, 0.7);
+}
+
+.message-wrapper.outgoing .tick-wrapper.delivered svg {
+  stroke: rgba(15, 23, 42, 0.85);
+}
+
+.message-wrapper.outgoing .tick-wrapper.read svg {
+  stroke: #1D4ED8 !important; /* Deep Cobalt Blue Read Status on Teal Accent */
+  filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.7));
+}
+
+/* Light Mode Overrides for Outgoing Checkmarks */
+.theme-light .message-wrapper.outgoing .tick-wrapper.read svg {
+  stroke: #0284C7 !important;
 }
 
 /* Input Bar Layout */
