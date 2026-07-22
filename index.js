@@ -7,7 +7,8 @@ const state = {
   socket: null,
   reconnectAttempts: 0,
   activeChatPartner: null, // username string
-  chats: [], // [{ username, email, deviceKeys: [{device_id, public_key}], unreadCount }]
+  activeSidebarTab: 'home', // 'home' | 'requests'
+  chats: [], // [{ username, email, deviceKeys: [{device_id, public_key}], unreadCount, status }]
   messages: [], // [{ id, chatPartner, sender, body, timestamp, media: { url, filename, type, size }, status }]
   outbox: [], // Pending messages queue for low internet resilience
   typingTimer: null,
@@ -27,6 +28,146 @@ const API_BASE = window.location.origin;
 const WS_BASE = window.location.protocol === 'https:' 
   ? `wss://${window.location.host}` 
   : `ws://${window.location.host}`;
+
+
+/* ═══════════ CUSTOM TOAST & CONFIRM MODAL CONTROLLERS ═══════════ */
+function showToast(message, type = 'info', duration = 3000) {
+  const container = document.getElementById('toastContainer');
+  if (!container) return;
+
+  const toast = document.createElement('div');
+  toast.className = `toast-notification ${type}`;
+  
+  let iconName = 'info';
+  if (type === 'success') iconName = 'check-circle';
+  if (type === 'error') iconName = 'alert-circle';
+
+  toast.innerHTML = `
+    <i data-feather="${iconName}" class="toast-icon"></i>
+    <span>${message}</span>
+  `;
+
+  container.appendChild(toast);
+  feather.replace();
+
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateY(-10px) scale(0.95)';
+    setTimeout(() => toast.remove(), 250);
+  }, duration);
+}
+
+let pendingConfirmCallback = null;
+
+function showConfirmModal(options) {
+  const {
+    title = 'Are you sure?',
+    message = 'This action cannot be undone.',
+    icon = 'alert-triangle',
+    confirmText = 'Confirm',
+    cancelText = 'Cancel',
+    isDanger = false,
+    onConfirm
+  } = options;
+
+  const modal = document.getElementById('customConfirmModal');
+  const titleEl = document.getElementById('confirmModalTitle');
+  const msgEl = document.getElementById('confirmModalMessage');
+  const iconWrapper = document.getElementById('confirmModalIconWrapper');
+  const iconEl = document.getElementById('confirmModalIcon');
+  const btnOk = document.getElementById('btnConfirmOk');
+  const btnCancel = document.getElementById('btnConfirmCancel');
+
+  if (!modal) return;
+
+  if (titleEl) titleEl.innerText = title;
+  if (msgEl) msgEl.innerText = message;
+  if (btnOk) {
+    btnOk.innerText = confirmText;
+    btnOk.className = isDanger ? 'btn btn-danger' : 'btn btn-primary';
+  }
+  if (btnCancel) btnCancel.innerText = cancelText;
+
+  if (iconWrapper) {
+    iconWrapper.className = `confirm-modal-icon-wrapper ${isDanger ? 'danger' : ''}`;
+  }
+  if (iconEl) {
+    iconEl.setAttribute('data-feather', icon);
+  }
+
+  feather.replace();
+  pendingConfirmCallback = onConfirm;
+  modal.classList.add('active');
+
+  // Push state to support back gesture closing modal
+  history.pushState({ modalOpen: true }, '');
+}
+
+function closeConfirmModal() {
+  const modal = document.getElementById('customConfirmModal');
+  if (modal) modal.classList.remove('active');
+  pendingConfirmCallback = null;
+}
+
+
+/* ═══════════ HISTORY API & BACK GESTURE NAVIGATION ═══════════ */
+function initHistoryNavigation() {
+  window.addEventListener('popstate', (e) => {
+    // 1. Close confirm modal if open
+    const confirmModal = document.getElementById('customConfirmModal');
+    if (confirmModal && confirmModal.classList.contains('active')) {
+      confirmModal.classList.remove('active');
+      pendingConfirmCallback = null;
+      return;
+    }
+
+    // 2. Close settings modal if open
+    const settingsModal = document.getElementById('settingsModal');
+    if (settingsModal && settingsModal.classList.contains('active')) {
+      settingsModal.classList.remove('active');
+      return;
+    }
+
+    // 3. Return from Active Conversation Pane to Sidebar on mobile/desktop back gesture
+    if (state.activeChatPartner) {
+      state.activeChatPartner = null;
+      localStorage.removeItem('ichat_active_partner');
+      document.getElementById('chatPane')?.classList.remove('active');
+      document.getElementById('chatEmptyState')?.classList.add('active');
+      document.getElementById('chatWindow')?.classList.remove('active');
+      document.getElementById('sidebar')?.classList.remove('inactive');
+      return;
+    }
+
+    // 4. Return to Home tab if in Requests tab
+    if (state.activeSidebarTab === 'requests') {
+      switchSidebarTab('home');
+      return;
+    }
+  });
+}
+
+function switchSidebarTab(tabName) {
+  state.activeSidebarTab = tabName;
+  const chatsView = document.getElementById('chatsView');
+  const requestsView = document.getElementById('requestsView');
+  const tabHome = document.getElementById('tabNavHome');
+  const tabRequests = document.getElementById('tabNavRequests');
+
+  if (tabName === 'requests') {
+    chatsView?.classList.remove('active');
+    requestsView?.classList.add('active');
+    tabHome?.classList.remove('active');
+    tabRequests?.classList.add('active');
+    renderRequestsList();
+  } else {
+    requestsView?.classList.remove('active');
+    chatsView?.classList.add('active');
+    tabRequests?.classList.remove('active');
+    tabHome?.classList.add('active');
+    renderChatList();
+  }
+}
 
 // IndexedDB setup for E2EE Media Storage (to bypass 5MB localStorage limit)
 const DB_NAME = 'ichat_media_db';
@@ -1397,19 +1538,71 @@ function declineChatRequest(partnerUsername) {
   renderChatList();
   renderRequestsList();
   renderActiveChat();
+  showToast(`Request from @${partnerUsername} declined`, 'info');
 }
 
-// Sidebar Requests list renderer (Bottom section)
+// Bulk Decline All Pending Requests
+function declineAllRequests() {
+  const pendingRequests = state.chats.filter(c => c && c.status === 'pending_incoming');
+  if (pendingRequests.length === 0) {
+    showToast('No pending requests to decline', 'info');
+    return;
+  }
+
+  showConfirmModal({
+    title: 'Decline All Requests?',
+    message: `Are you sure you want to decline and clear all ${pendingRequests.length} pending message requests?`,
+    icon: 'trash-2',
+    confirmText: 'Decline All',
+    cancelText: 'Cancel',
+    isDanger: true,
+    onConfirm: () => {
+      const usernamesToRemove = pendingRequests.map(c => c.username);
+      state.chats = state.chats.filter(c => !usernamesToRemove.includes(c.username));
+      state.messages = state.messages.filter(m => !usernamesToRemove.includes(m.chatPartner));
+      
+      if (usernamesToRemove.includes(state.activeChatPartner)) {
+        state.activeChatPartner = null;
+        document.getElementById('chatPane')?.classList.remove('active');
+        document.getElementById('chatEmptyState')?.classList.add('active');
+      }
+
+      saveStateToLocalStorage();
+      renderChatList();
+      renderRequestsList();
+      renderActiveChat();
+      showToast('All pending requests declined', 'success');
+    }
+  });
+}
+
+// Sidebar Requests list renderer (100+ Requests Scalable View)
 function renderRequestsList() {
   const container = document.getElementById('requestsContainer');
-  const badge = document.getElementById('requestsCountBadge');
-  if (!container || !badge) return;
+  const badgeView = document.getElementById('requestsCountBadge');
+  const badgeNav = document.getElementById('requestsNavBadge');
+  const filterInput = document.getElementById('requestSearchInput');
+  const query = filterInput ? filterInput.value.trim().toLowerCase() : '';
 
-  const pendingRequests = state.chats.filter(c => c && c.status === 'pending_incoming');
-  badge.innerText = pendingRequests.length;
+  if (!container) return;
+
+  let pendingRequests = state.chats.filter(c => c && c.status === 'pending_incoming');
+  const totalCount = pendingRequests.length;
+  const formattedCount = totalCount > 99 ? '99+' : totalCount.toString();
+
+  if (badgeView) badgeView.innerText = formattedCount;
+  if (badgeNav) {
+    badgeNav.innerText = formattedCount;
+    badgeNav.style.display = totalCount > 0 ? 'inline-block' : 'none';
+  }
+
+  // Live filter query
+  if (query) {
+    pendingRequests = pendingRequests.filter(c => c.username.toLowerCase().includes(query));
+  }
 
   if (pendingRequests.length === 0) {
-    container.innerHTML = '<div style="padding: 10px 16px; font-size: 11.5px; color: var(--text-muted);">No pending requests</div>';
+    container.innerHTML = `<div style="padding: 24px 16px; text-align: center; color: var(--text-muted); font-size: 13px;">${query ? 'No matching requests' : 'No pending message requests'}</div>`;
     return;
   }
 
@@ -1428,7 +1621,7 @@ function renderRequestsList() {
         <div class="request-avatar">${avatarInitial}</div>
         <div class="request-user-info">
           <h5>@${chat.username}</h5>
-          <p style="max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${displayMsg}</p>
+          <p style="max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${displayMsg}</p>
         </div>
       </div>
       <span class="request-tag">Request</span>
@@ -1525,6 +1718,9 @@ function renderChatList() {
 function openConversation(username) {
   state.activeChatPartner = username;
   localStorage.setItem('ichat_active_partner', username);
+
+  // Push history state to enable back gesture / browser back button navigation
+  history.pushState({ view: 'chat', partner: username }, '');
 
   const emptyState = document.getElementById('chatEmptyState');
   if (emptyState) emptyState.classList.remove('active');
@@ -1869,63 +2065,76 @@ async function updateStorageStatsUI() {
         `;
 
         const deleteFileBtn = fileItem.querySelector('.btn-delete-file');
-        deleteFileBtn.addEventListener('click', async (e) => {
+        deleteFileBtn.addEventListener('click', (e) => {
           e.stopPropagation();
-          if (confirm(`Delete the file "${msg.media.filename}" from this chat? This releases the storage.`)) {
-            // 1. Delete from IndexedDB
-            if (mediaDb) {
-              const transaction = mediaDb.transaction(['media'], 'readwrite');
-              const store = transaction.objectStore('media');
-              store.delete(msg.media.url);
+          showConfirmModal({
+            title: 'Delete File?',
+            message: `Delete the file "${msg.media.filename}" from this chat? This releases local storage.`,
+            icon: 'trash-2',
+            confirmText: 'Delete File',
+            cancelText: 'Cancel',
+            isDanger: true,
+            onConfirm: async () => {
+              // 1. Delete from IndexedDB
+              if (mediaDb) {
+                const transaction = mediaDb.transaction(['media'], 'readwrite');
+                const store = transaction.objectStore('media');
+                store.delete(msg.media.url);
+              }
+              // 2. Clear local memory cache
+              state.localMediaCache.delete(msg.media.url);
+              
+              // 3. Update message object
+              msg.body = `[File deleted: ${msg.media.filename}]`;
+              msg.media = null;
+              
+              saveStateToLocalStorage();
+              await updateStorageStatsUI();
+              renderActiveChat();
+              showToast('File deleted from storage', 'info');
             }
-            // 2. Clear local memory cache
-            state.localMediaCache.delete(msg.media.url);
-            
-            // 3. Update message object
-            msg.body = `[File deleted: ${msg.media.filename}]`;
-            msg.media = null;
-            
-            saveStateToLocalStorage();
-            await updateStorageStatsUI();
-            renderActiveChat();
-          }
+          });
         });
 
         mediaListEl.appendChild(fileItem);
       });
     }
 
-    // Toggle view files list
-    toggleBtn.addEventListener('click', () => {
-      mediaListEl.classList.toggle('active');
-    });
-
     // Clear specific chat
-    clearBtn.addEventListener('click', async () => {
-      if (confirm(`Delete all messages and media files for the conversation with @${stat.username}?`)) {
-        // Delete media files from IndexedDB
-        stat.mediaFiles.forEach(m => {
-          if (mediaDb) {
-            const transaction = mediaDb.transaction(['media'], 'readwrite');
-            const store = transaction.objectStore('media');
-            store.delete(m.media.url);
-          }
-          state.localMediaCache.delete(m.media.url);
-        });
+    clearBtn.addEventListener('click', () => {
+      showConfirmModal({
+        title: `Clear Chat with @${stat.username}?`,
+        message: `Delete all messages and media files for the conversation with @${stat.username}?`,
+        icon: 'trash-2',
+        confirmText: 'Clear Chat',
+        cancelText: 'Cancel',
+        isDanger: true,
+        onConfirm: async () => {
+          // Delete media files from IndexedDB
+          stat.mediaFiles.forEach(m => {
+            if (mediaDb) {
+              const transaction = mediaDb.transaction(['media'], 'readwrite');
+              const store = transaction.objectStore('media');
+              store.delete(m.media.url);
+            }
+            state.localMediaCache.delete(m.media.url);
+          });
 
-        // Filter messages out
-        state.messages = state.messages.filter(m => m.chatPartner !== stat.username);
-        saveStateToLocalStorage();
-        
-        await updateStorageStatsUI();
-        if (state.activeChatPartner === stat.username) {
-          state.activeChatPartner = null;
-          document.getElementById('chatPane').classList.remove('active');
-          document.getElementById('chatEmptyState').classList.add('active');
+          // Filter messages out
+          state.messages = state.messages.filter(m => m.chatPartner !== stat.username);
+          saveStateToLocalStorage();
+          
+          await updateStorageStatsUI();
+          if (state.activeChatPartner === stat.username) {
+            state.activeChatPartner = null;
+            document.getElementById('chatPane').classList.remove('active');
+            document.getElementById('chatEmptyState').classList.add('active');
+          }
+          renderChatList();
+          renderActiveChat();
+          showToast(`Chat with @${stat.username} cleared`, 'info');
         }
-        renderChatList();
-        renderActiveChat();
-      }
+      });
     });
 
     chatsListEl.appendChild(item);
@@ -2242,30 +2451,70 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('restorePasscode').value = '';
   });
 
-  // Settings: Clear Cached Media files
-  document.getElementById('btnClearMedia').addEventListener('click', async () => {
-    if (confirm('Are you sure you want to clear all downloaded media files from your local storage cache? Text chats will be kept.')) {
-      await clearMediaLocalDB();
-      state.localMediaCache.clear();
-      updateStorageStatsUI();
-      renderActiveChat();
-      alert('Downloaded media attachments cleared.');
+  // Initialize history back-gesture navigation
+  initHistoryNavigation();
+
+  // Confirm Modal buttons
+  document.getElementById('btnConfirmOk')?.addEventListener('click', () => {
+    if (typeof pendingConfirmCallback === 'function') {
+      const cb = pendingConfirmCallback;
+      closeConfirmModal();
+      cb();
+    } else {
+      closeConfirmModal();
     }
+  });
+
+  document.getElementById('btnConfirmCancel')?.addEventListener('click', closeConfirmModal);
+
+  // Bottom Sidebar Tabs Navigation
+  document.getElementById('tabNavHome')?.addEventListener('click', () => switchSidebarTab('home'));
+  document.getElementById('tabNavRequests')?.addEventListener('click', () => switchSidebarTab('requests'));
+
+  // Requests Filter Search & Bulk Decline
+  document.getElementById('requestSearchInput')?.addEventListener('input', renderRequestsList);
+  document.getElementById('btnDeclineAllRequests')?.addEventListener('click', declineAllRequests);
+
+  // Settings: Clear Cached Media files
+  document.getElementById('btnClearMedia').addEventListener('click', () => {
+    showConfirmModal({
+      title: 'Clear Cached Media?',
+      message: 'Are you sure you want to clear all downloaded media files from your local storage cache? Text chats will be kept.',
+      icon: 'trash-2',
+      confirmText: 'Clear Media',
+      cancelText: 'Cancel',
+      isDanger: true,
+      onConfirm: async () => {
+        await clearMediaLocalDB();
+        state.localMediaCache.clear();
+        updateStorageStatsUI();
+        renderActiveChat();
+        showToast('Downloaded media attachments cleared', 'success');
+      }
+    });
   });
 
   // Settings: Clear chat logs database
   document.getElementById('btnClearAllChats').addEventListener('click', () => {
-    if (confirm('WARNING: This will permanently delete your entire local chat history. This action is irreversible. Proceed?')) {
-      state.chats = [];
-      state.messages = [];
-      state.localMediaCache.clear();
-      clearMediaLocalDB();
-      saveStateToLocalStorage();
-      renderChatList();
-      renderActiveChat();
-      updateStorageStatsUI();
-      alert('Chat history wiped.');
-    }
+    showConfirmModal({
+      title: 'Clear All History?',
+      message: 'WARNING: This will permanently delete your entire local chat history. This action is irreversible. Proceed?',
+      icon: 'alert-triangle',
+      confirmText: 'Wipe History',
+      cancelText: 'Cancel',
+      isDanger: true,
+      onConfirm: () => {
+        state.chats = [];
+        state.messages = [];
+        state.localMediaCache.clear();
+        clearMediaLocalDB();
+        saveStateToLocalStorage();
+        renderChatList();
+        renderActiveChat();
+        updateStorageStatsUI();
+        showToast('Chat history wiped', 'info');
+      }
+    });
   });
 
   // Settings: Delete entire account profile
@@ -2273,9 +2522,17 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // 8. Log out session
   const triggerLogOutAction = () => {
-    if (confirm('Log out from this device session? You can restore your chats later using a backup password.')) {
-      triggerLogOut();
-    }
+    showConfirmModal({
+      title: 'Log Out Session?',
+      message: 'Log out from this device session? You can restore your chats later using a backup password.',
+      icon: 'log-out',
+      confirmText: 'Log Out',
+      cancelText: 'Cancel',
+      isDanger: true,
+      onConfirm: () => {
+        triggerLogOut();
+      }
+    });
   };
 
   document.getElementById('btnLogout')?.addEventListener('click', triggerLogOutAction);

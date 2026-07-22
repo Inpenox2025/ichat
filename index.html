@@ -154,45 +154,82 @@
             </div>
           </div>
 
-          <!-- Search / Add Contact Form -->
-          <div class="sidebar-search">
-            <form id="addContactForm" class="search-form">
-              <div class="search-input-wrapper">
-                <i data-feather="search" class="search-icon"></i>
-                <input type="text" id="contactSearchInput" placeholder="Search by username or email..." autocomplete="off">
-                <button type="submit" class="search-btn" id="btnAddContact" title="Start Chat">
-                  <i data-feather="plus"></i>
+          <!-- Sidebar Views Container -->
+          <div class="sidebar-views-wrapper">
+            
+            <!-- VIEW 1: HOME (Chats List) -->
+            <div id="chatsView" class="sidebar-tab-view active">
+              <!-- Search / Add Contact Form -->
+              <div class="sidebar-search">
+                <form id="addContactForm" class="search-form">
+                  <div class="search-input-wrapper">
+                    <i data-feather="search" class="search-icon"></i>
+                    <input type="text" id="contactSearchInput" placeholder="Search by username or email..." autocomplete="off">
+                    <button type="submit" class="search-btn" id="btnAddContact" title="Start Chat">
+                      <i data-feather="plus"></i>
+                    </button>
+                  </div>
+                </form>
+                <div id="searchDropdownList" class="search-results-dropdown">
+                  <!-- Search outcomes populate here -->
+                </div>
+              </div>
+
+              <!-- Chat List -->
+              <div class="chat-list" id="chatsContainer">
+                <!-- Empty state when no chats are loaded -->
+                <div class="chat-list-empty">
+                  <i data-feather="users" class="empty-icon"></i>
+                  <p>No conversations started.</p>
+                  <span>Add a contact above to begin encrypting.</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- VIEW 2: REQUESTS (Message Requests 100+ Scalable View) -->
+            <div id="requestsView" class="sidebar-tab-view">
+              <div class="requests-view-header">
+                <div class="requests-view-title">
+                  <i data-feather="inbox"></i>
+                  <h4>Message Requests</h4>
+                  <span class="requests-badge" id="requestsCountBadge">0</span>
+                </div>
+                <button type="button" class="btn btn-outline btn-danger btn-xs" id="btnDeclineAllRequests" title="Decline All Pending Requests">
+                  <i data-feather="trash-2"></i> Decline All
                 </button>
               </div>
-            </form>
-            <div id="searchDropdownList" class="search-results-dropdown">
-              <!-- Search outcomes populate here -->
-            </div>
-          </div>
 
-          <!-- Chat List -->
-          <div class="chat-list" id="chatsContainer">
-            <!-- Empty state when no chats are loaded -->
-            <div class="chat-list-empty">
-              <i data-feather="users" class="empty-icon"></i>
-              <p>No conversations started.</p>
-              <span>Add a contact above to begin encrypting.</span>
-            </div>
-          </div>
-
-          <!-- Message Requests Section at Bottom -->
-          <div class="requests-section" id="requestsSection">
-            <div class="requests-header" id="requestsHeaderToggle">
-              <div class="requests-header-title">
-                <i data-feather="inbox"></i>
-                <span>Message Requests</span>
+              <!-- Filter Search Input for 100+ Requests -->
+              <div class="requests-filter-wrapper">
+                <i data-feather="search" class="search-icon"></i>
+                <input type="text" id="requestSearchInput" placeholder="Search requests by username..." autocomplete="off">
               </div>
-              <span class="requests-badge" id="requestsCountBadge">0</span>
+
+              <!-- Requests List Container -->
+              <div class="requests-list-container" id="requestsContainer">
+                <!-- Pending incoming requests populate dynamically -->
+              </div>
             </div>
-            <div class="requests-list" id="requestsContainer">
-              <!-- Pending incoming requests populate dynamically -->
-            </div>
+
           </div>
+
+          <!-- SIDEBAR BOTTOM NAV TABS (Home vs Requests) -->
+          <nav class="sidebar-bottom-nav" id="sidebarBottomNav">
+            <button type="button" class="nav-tab active" id="tabNavHome">
+              <div class="nav-tab-icon-wrapper">
+                <i data-feather="message-square"></i>
+                <span class="nav-tab-badge" id="homeUnreadBadge" style="display: none;">0</span>
+              </div>
+              <span>Home</span>
+            </button>
+            <button type="button" class="nav-tab" id="tabNavRequests">
+              <div class="nav-tab-icon-wrapper">
+                <i data-feather="inbox"></i>
+                <span class="nav-tab-badge requests-nav-badge" id="requestsNavBadge" style="display: none;">0</span>
+              </div>
+              <span>Requests</span>
+            </button>
+          </nav>
         </aside>
 
         <!-- 3B. MAIN CHAT WINDOW -->
@@ -423,6 +460,24 @@
         </div>
       </div>
     </div>
+
+    <!-- 6. CUSTOM GLASSMORPHIC CONFIRMATION MODAL (Replaces native browser confirm) -->
+    <div id="customConfirmModal" class="modal-overlay">
+      <div class="confirm-modal-card">
+        <div class="confirm-modal-icon-wrapper" id="confirmModalIconWrapper">
+          <i data-feather="alert-triangle" id="confirmModalIcon"></i>
+        </div>
+        <h3 id="confirmModalTitle">Are you sure?</h3>
+        <p id="confirmModalMessage">This action cannot be undone.</p>
+        <div class="confirm-modal-actions">
+          <button type="button" class="btn btn-outline" id="btnConfirmCancel">Cancel</button>
+          <button type="button" class="btn btn-primary" id="btnConfirmOk">Confirm</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 7. FLOATING TOAST NOTIFICATION CONTAINER (Replaces native browser alert) -->
+    <div id="toastContainer" class="toast-container"></div>
 
   </div>
 
