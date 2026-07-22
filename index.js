@@ -417,6 +417,7 @@ async function sendE2EEMessage(recipientUsername, bodyText, mediaData = null) {
   const messagePacket = {
     type: 'message',
     messageId,
+    sender: state.user?.username || '',
     recipient: recipientUsername,
     keys: keysMap,
     payload: JSON.stringify(payload),
@@ -455,6 +456,8 @@ async function sendE2EEMessage(recipientUsername, bodyText, mediaData = null) {
       localMsgObj.status = 'delivered';
       saveStateToLocalStorage();
       renderActiveChat();
+      // Immediately check queue
+      pollTransientQueue();
     } catch (e) {
       console.warn('[OUTBOX] HTTP delivery failed. Buffering message packet to local outbox:', e);
       state.outbox.push(messagePacket);
