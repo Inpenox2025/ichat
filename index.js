@@ -8,6 +8,10 @@ const state = {
   reconnectAttempts: 0,
   activeChatPartner: null, // username string
   activeSidebarTab: 'home', // 'home' | 'requests'
+  selectedChats: new Set(),
+  selectedRequests: new Set(),
+  isChatsSelectionMode: false,
+  isRequestsSelectionMode: false,
   chats: [], // [{ username, email, deviceKeys: [{device_id, public_key}], unreadCount, status }]
   messages: [], // [{ id, chatPartner, sender, body, timestamp, media: { url, filename, type, size }, status }]
   outbox: [], // Pending messages queue for low internet resilience
@@ -167,6 +171,219 @@ function switchSidebarTab(tabName) {
     tabHome?.classList.add('active');
     renderChatList();
   }
+}
+
+/* ═══════════ LONG-PRESS & MULTI-SELECT CONTROLLERS ═══════════ */
+function bindLongPress(element, onLongPress, onClick) {
+  let timer = null;
+  let isLongPress = false;
+
+  const start = (e) => {
+    isLongPress = false;
+    timer = setTimeout(() => {
+      isLongPress = true;
+      if (navigator.vibrate) navigator.vibrate(50);
+      onLongPress(e);
+    }, 500);
+  };
+
+  const cancel = () => {
+    clearTimeout(timer);
+  };
+
+  const end = (e) => {
+    clearTimeout(timer);
+    if (!isLongPress && onClick) {
+      onClick(e);
+    }
+  };
+
+  element.addEventListener('touchstart', start, { passive: true });
+  element.addEventListener('touchend', end);
+  element.addEventListener('touchmove', cancel, { passive: true });
+  element.addEventListener('mousedown', start);
+  element.addEventListener('mouseup', end);
+  element.addEventListener('mouseleave', cancel);
+  element.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    onLongPress(e);
+  });
+}
+
+// CHATS SELECTION CONTROLS
+function toggleChatSelection(username) {
+  state.isChatsSelectionMode = true;
+  if (state.selectedChats.has(username)) {
+    state.selectedChats.delete(username);
+  } else {
+    state.selectedChats.add(username);
+  }
+  
+  if (state.selectedChats.size === 0) {
+    exitChatsSelection();
+  } else {
+    updateChatsSelectionBar();
+    renderChatList();
+  }
+}
+
+function updateChatsSelectionBar() {
+  const bar = document.getElementById('chatsSelectionBar');
+  const countEl = document.getElementById('chatsSelectedCount');
+  const btnSelectAll = document.getElementById('btnSelectAllChats');
+  const mainChats = state.chats.filter(c => c && (c.status === 'accepted' || c.status === 'pending_outgoing' || !c.status));
+
+  if (bar) bar.style.display = 'flex';
+  if (countEl) countEl.innerText = `${state.selectedChats.size} Selected`;
+  
+  if (btnSelectAll) {
+    const isAllSelected = mainChats.length > 0 && state.selectedChats.size === mainChats.length;
+    btnSelectAll.innerText = isAllSelected ? 'Deselect All' : 'Select All';
+  }
+}
+
+function exitChatsSelection() {
+  state.isChatsSelectionMode = false;
+  state.selectedChats.clear();
+  const bar = document.getElementById('chatsSelectionBar');
+  if (bar) bar.style.display = 'none';
+  renderChatList();
+}
+
+function toggleSelectAllChats() {
+  const mainChats = state.chats.filter(c => c && (c.status === 'accepted' || c.status === 'pending_outgoing' || !c.status));
+  if (state.selectedChats.size === mainChats.length) {
+    state.selectedChats.clear();
+    exitChatsSelection();
+  } else {
+    state.isChatsSelectionMode = true;
+    mainChats.forEach(c => state.selectedChats.add(c.username));
+    updateChatsSelectionBar();
+    renderChatList();
+  }
+}
+
+function deleteSelectedChats() {
+  if (state.selectedChats.size === 0) return;
+  const count = state.selectedChats.size;
+
+  showConfirmModal({
+    title: `Delete ${count} Conversation${count > 1 ? 's' : ''}?`,
+    message: `Are you sure you want to delete ${count} selected chat${count > 1 ? 's' : ''} and all associated message history?`,
+    icon: 'trash-2',
+    confirmText: `Delete ${count} Chat${count > 1 ? 's' : ''}`,
+    cancelText: 'Cancel',
+    isDanger: true,
+    onConfirm: () => {
+      const selectedUsernames = Array.from(state.selectedChats);
+      state.chats = state.chats.filter(c => !selectedUsernames.includes(c.username));
+      state.messages = state.messages.filter(m => !selectedUsernames.includes(m.chatPartner));
+
+      if (selectedUsernames.includes(state.activeChatPartner)) {
+        state.activeChatPartner = null;
+        document.getElementById('chatPane')?.classList.remove('active');
+        document.getElementById('chatEmptyState')?.classList.add('active');
+      }
+
+      saveStateToLocalStorage();
+      exitChatsSelection();
+      showToast(`${count} conversation${count > 1 ? 's' : ''} deleted`, 'info');
+    }
+  });
+}
+
+// REQUESTS SELECTION CONTROLS
+function toggleRequestSelection(username) {
+  state.isRequestsSelectionMode = true;
+  if (state.selectedRequests.has(username)) {
+    state.selectedRequests.delete(username);
+  } else {
+    state.selectedRequests.add(username);
+  }
+
+  if (state.selectedRequests.size === 0) {
+    exitRequestsSelection();
+  } else {
+    updateRequestsSelectionBar();
+    renderRequestsList();
+  }
+}
+
+function updateRequestsSelectionBar() {
+  const bar = document.getElementById('requestsSelectionBar');
+  const countEl = document.getElementById('requestsSelectedCount');
+  const btnSelectAll = document.getElementById('btnSelectAllRequests');
+  const pendingRequests = state.chats.filter(c => c && c.status === 'pending_incoming');
+
+  if (bar) bar.style.display = 'flex';
+  if (countEl) countEl.innerText = `${state.selectedRequests.size} Selected`;
+  
+  if (btnSelectAll) {
+    const isAllSelected = pendingRequests.length > 0 && state.selectedRequests.size === pendingRequests.length;
+    btnSelectAll.innerText = isAllSelected ? 'Deselect All' : 'Select All';
+  }
+}
+
+function exitRequestsSelection() {
+  state.isRequestsSelectionMode = false;
+  state.selectedRequests.clear();
+  const bar = document.getElementById('requestsSelectionBar');
+  if (bar) bar.style.display = 'none';
+  renderRequestsList();
+}
+
+function toggleSelectAllRequests() {
+  const pendingRequests = state.chats.filter(c => c && c.status === 'pending_incoming');
+  if (state.selectedRequests.size === pendingRequests.length) {
+    state.selectedRequests.clear();
+    exitRequestsSelection();
+  } else {
+    state.isRequestsSelectionMode = true;
+    pendingRequests.forEach(c => state.selectedRequests.add(c.username));
+    updateRequestsSelectionBar();
+    renderRequestsList();
+  }
+}
+
+function acceptSelectedRequests() {
+  if (state.selectedRequests.size === 0) return;
+  const selectedUsernames = Array.from(state.selectedRequests);
+
+  selectedUsernames.forEach(username => {
+    acceptChatRequest(username);
+  });
+
+  exitRequestsSelection();
+  showToast(`${selectedUsernames.length} request${selectedUsernames.length > 1 ? 's' : ''} accepted`, 'success');
+}
+
+function declineSelectedRequests() {
+  if (state.selectedRequests.size === 0) return;
+  const count = state.selectedRequests.size;
+
+  showConfirmModal({
+    title: `Decline ${count} Request${count > 1 ? 's' : ''}?`,
+    message: `Are you sure you want to decline and remove ${count} selected request${count > 1 ? 's' : ''}?`,
+    icon: 'trash-2',
+    confirmText: `Decline ${count}`,
+    cancelText: 'Cancel',
+    isDanger: true,
+    onConfirm: () => {
+      const selectedUsernames = Array.from(state.selectedRequests);
+      state.chats = state.chats.filter(c => !selectedUsernames.includes(c.username));
+      state.messages = state.messages.filter(m => !selectedUsernames.includes(m.chatPartner));
+
+      if (selectedUsernames.includes(state.activeChatPartner)) {
+        state.activeChatPartner = null;
+        document.getElementById('chatPane')?.classList.remove('active');
+        document.getElementById('chatEmptyState')?.classList.add('active');
+      }
+
+      saveStateToLocalStorage();
+      exitRequestsSelection();
+      showToast(`${count} request${count > 1 ? 's' : ''} declined`, 'info');
+    }
+  });
 }
 
 // IndexedDB setup for E2EE Media Storage (to bypass 5MB localStorage limit)
@@ -1613,10 +1830,16 @@ function renderRequestsList() {
       ? (lastMsg.media ? `📷 ${lastMsg.media.filename}` : (lastMsg.body || '')) 
       : 'New Message Request';
     const avatarInitial = (chat.username || 'C').substring(0, 2).toUpperCase();
+    const isSelected = state.selectedRequests.has(chat.username);
 
     const item = document.createElement('div');
-    item.className = `request-item ${state.activeChatPartner === chat.username ? 'active' : ''}`;
+    item.className = `request-item ${state.activeChatPartner === chat.username ? 'active' : ''} ${isSelected ? 'selected' : ''}`;
     item.innerHTML = `
+      ${state.isRequestsSelectionMode ? `
+        <div class="custom-checkbox">
+          <i data-feather="check"></i>
+        </div>
+      ` : ''}
       <div class="request-item-user">
         <div class="request-avatar">${avatarInitial}</div>
         <div class="request-user-info">
@@ -1627,12 +1850,22 @@ function renderRequestsList() {
       <span class="request-tag">Request</span>
     `;
 
-    item.addEventListener('click', () => {
-      openConversation(chat.username);
-    });
+    bindLongPress(item, 
+      () => {
+        toggleRequestSelection(chat.username);
+      },
+      () => {
+        if (state.isRequestsSelectionMode) {
+          toggleRequestSelection(chat.username);
+        } else {
+          openConversation(chat.username);
+        }
+      }
+    );
 
     container.appendChild(item);
   });
+  feather.replace();
 }
 
 // Sidebar Chats list renderer (Main chats)
@@ -1677,13 +1910,18 @@ function renderChatList() {
       : '';
 
     const avatarInitial = (chat.username || 'C').substring(0, 2).toUpperCase();
-
     const isPendingOutgoing = chat.status === 'pending_outgoing';
+    const isSelected = state.selectedChats.has(chat.username);
 
     const item = document.createElement('div');
-    item.className = `chat-list-item ${state.activeChatPartner === chat.username ? 'active' : ''}`;
+    item.className = `chat-list-item ${state.activeChatPartner === chat.username ? 'active' : ''} ${isSelected ? 'selected' : ''}`;
     
     item.innerHTML = `
+      ${state.isChatsSelectionMode ? `
+        <div class="custom-checkbox">
+          <i data-feather="check"></i>
+        </div>
+      ` : ''}
       <div class="chat-item-avatar-wrapper">
         <div class="chat-item-avatar">${avatarInitial}</div>
       </div>
@@ -1699,13 +1937,20 @@ function renderChatList() {
       </div>
     `;
 
-    item.addEventListener('click', () => {
-      // Clear unreads
-      chat.unreadCount = 0;
-      saveStateToLocalStorage();
-      
-      openConversation(chat.username);
-    });
+    bindLongPress(item, 
+      () => {
+        toggleChatSelection(chat.username);
+      },
+      () => {
+        if (state.isChatsSelectionMode) {
+          toggleChatSelection(chat.username);
+        } else {
+          chat.unreadCount = 0;
+          saveStateToLocalStorage();
+          openConversation(chat.username);
+        }
+      }
+    );
 
     container.appendChild(item);
   });
@@ -2466,6 +2711,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   document.getElementById('btnConfirmCancel')?.addEventListener('click', closeConfirmModal);
+
+  // Selection Action Bars Listeners
+  document.getElementById('btnExitChatsSelection')?.addEventListener('click', exitChatsSelection);
+  document.getElementById('btnSelectAllChats')?.addEventListener('click', toggleSelectAllChats);
+  document.getElementById('btnDeleteSelectedChats')?.addEventListener('click', deleteSelectedChats);
+
+  document.getElementById('btnExitRequestsSelection')?.addEventListener('click', exitRequestsSelection);
+  document.getElementById('btnSelectAllRequests')?.addEventListener('click', toggleSelectAllRequests);
+  document.getElementById('btnAcceptSelectedRequests')?.addEventListener('click', acceptSelectedRequests);
+  document.getElementById('btnDeclineSelectedRequests')?.addEventListener('click', declineSelectedRequests);
 
   // Bottom Sidebar Tabs Navigation
   document.getElementById('tabNavHome')?.addEventListener('click', () => switchSidebarTab('home'));

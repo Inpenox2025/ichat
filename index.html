@@ -159,6 +159,22 @@
             
             <!-- VIEW 1: HOME (Chats List) -->
             <div id="chatsView" class="sidebar-tab-view active">
+              <!-- Chats Selection Action Bar (hidden by default) -->
+              <div class="selection-action-bar" id="chatsSelectionBar" style="display: none;">
+                <div class="selection-info">
+                  <button type="button" class="icon-btn" id="btnExitChatsSelection" title="Cancel Selection">
+                    <i data-feather="x"></i>
+                  </button>
+                  <span id="chatsSelectedCount">0 Selected</span>
+                </div>
+                <div class="selection-actions">
+                  <button type="button" class="btn btn-outline btn-xs" id="btnSelectAllChats">Select All</button>
+                  <button type="button" class="btn btn-danger btn-xs" id="btnDeleteSelectedChats" title="Delete Selected Chats">
+                    <i data-feather="trash-2"></i> Delete
+                  </button>
+                </div>
+              </div>
+
               <!-- Search / Add Contact Form -->
               <div class="sidebar-search">
                 <form id="addContactForm" class="search-form">
@@ -188,6 +204,25 @@
 
             <!-- VIEW 2: REQUESTS (Message Requests 100+ Scalable View) -->
             <div id="requestsView" class="sidebar-tab-view">
+              <!-- Requests Selection Action Bar (hidden by default) -->
+              <div class="selection-action-bar" id="requestsSelectionBar" style="display: none;">
+                <div class="selection-info">
+                  <button type="button" class="icon-btn" id="btnExitRequestsSelection" title="Cancel Selection">
+                    <i data-feather="x"></i>
+                  </button>
+                  <span id="requestsSelectedCount">0 Selected</span>
+                </div>
+                <div class="selection-actions">
+                  <button type="button" class="btn btn-outline btn-xs" id="btnSelectAllRequests">All</button>
+                  <button type="button" class="btn btn-primary btn-xs" id="btnAcceptSelectedRequests">
+                    <i data-feather="check"></i> Accept
+                  </button>
+                  <button type="button" class="btn btn-danger btn-xs" id="btnDeclineSelectedRequests">
+                    <i data-feather="x"></i> Decline
+                  </button>
+                </div>
+              </div>
+
               <div class="requests-view-header">
                 <div class="requests-view-title">
                   <i data-feather="inbox"></i>

@@ -2196,3 +2196,77 @@ h1, h2, h3, h4, h5, h6 {
   }
 }
 
+/* ═══════════ MULTI-SELECT & BULK ACTIONS ═══════════ */
+.selection-action-bar {
+  background-color: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  animation: slideIn 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 5;
+}
+
+.selection-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.selection-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.custom-checkbox {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 12px;
+  flex-shrink: 0;
+  transition: var(--transition);
+}
+
+.custom-checkbox i {
+  width: 12px;
+  height: 12px;
+  stroke: #ffffff;
+  opacity: 0;
+  transform: scale(0.5);
+  transition: var(--transition);
+}
+
+.chat-item.selected,
+.request-item.selected {
+  background-color: rgba(var(--accent-rgb), 0.12);
+  border-left: 3px solid var(--accent);
+}
+
+.chat-item.selected .custom-checkbox,
+.request-item.selected .custom-checkbox {
+  background-color: var(--accent);
+  border-color: var(--accent);
+}
+
+.chat-item.selected .custom-checkbox i,
+.request-item.selected .custom-checkbox i {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.chat-item, .request-item {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
