@@ -409,23 +409,23 @@ async function sendE2EEMessage(recipientUsername, bodyText, mediaData = null) {
 
   // 2. Generate random 256-bit symmetric encryption key (secret key)
   const sessionKey = nacl.randomBytes(32);
-  const nonce = nacl.randomBytes(24);
 
   // 3. Encrypt payload symmetrically
   const content = encryptSymmetric(bodyText || '', sessionKey);
+  const nonceBytes = decodeBase64(content.nonce);
 
   // 4. Encrypt session key for each active recipient device
   const keysMap = {};
   for (const dev of recipientKeys) {
     const devPub = decodeBase64(dev.public_key);
-    const encKey = encryptAsymmetric(devPub, state.keys.privateKey, sessionKey, nonce);
+    const encKey = encryptAsymmetric(devPub, state.keys.privateKey, sessionKey, nonceBytes);
     keysMap[dev.device_id] = encKey;
   }
 
   // Encrypt session key for each of my OTHER devices so they can sync this chat history
   for (const dev of senderOtherKeys) {
     const devPub = decodeBase64(dev.public_key);
-    const encKey = encryptAsymmetric(devPub, state.keys.privateKey, sessionKey, nonce);
+    const encKey = encryptAsymmetric(devPub, state.keys.privateKey, sessionKey, nonceBytes);
     keysMap[dev.device_id] = encKey;
   }
 
