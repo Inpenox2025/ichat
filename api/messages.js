@@ -47,6 +47,11 @@ module.exports = async function handler(req, res) {
         SELECT device_id FROM devices WHERE user_id = ${decoded.userId} AND device_id != ${decoded.deviceId}
       `;
 
+      const allTargetDevices = [
+        ...recipientDevices.map(d => ({ device_id: d.device_id, isSenderSync: false })),
+        ...senderDevices.map(d => ({ device_id: d.device_id, isSenderSync: true }))
+      ];
+
       // Fetch sender's username
       const senderUsers = await sql`SELECT username FROM users WHERE id = ${decoded.userId}`;
       const senderUsername = senderUsers.length > 0 && senderUsers[0].username 
