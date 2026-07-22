@@ -10,10 +10,12 @@
   --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   --accent-glow: 0 0 15px rgba(0, 242, 254, 0.3);
 
-  /* Default Theme: Dark (since we are creating a premium, modern design) */
+  /* Default Theme: Dark */
   --bg-primary: hsl(224, 25%, 12%);
   --bg-secondary: hsl(224, 25%, 16%);
   --bg-tertiary: hsl(224, 25%, 20%);
+  --bg-card: hsl(224, 25%, 16%);
+  --modal-overlay-bg: rgba(12, 16, 26, 0.75);
   --text-primary: hsl(210, 40%, 98%);
   --text-secondary: hsl(215, 20%, 75%);
   --text-muted: hsl(215, 15%, 50%);
@@ -38,6 +40,8 @@
   --bg-primary: hsl(210, 40%, 98%);
   --bg-secondary: hsl(0, 0%, 100%);
   --bg-tertiary: hsl(210, 30%, 94%);
+  --bg-card: hsl(0, 0%, 100%);
+  --modal-overlay-bg: rgba(0, 0, 0, 0.45);
   --text-primary: hsl(224, 25%, 12%);
   --text-secondary: hsl(224, 15%, 35%);
   --text-muted: hsl(224, 10%, 55%);
@@ -48,7 +52,7 @@
   
   --glass-bg: rgba(255, 255, 255, 0.75);
   --glass-border: rgba(0, 0, 0, 0.06);
-  --card-shadow: 0 15px 35px rgba(0, 0, 0, 0.06);
+  --card-shadow: 0 15px 35px rgba(0, 0, 0, 0.08);
   --input-bg: hsl(210, 20%, 95%);
   
   --accent-glow: 0 0 15px rgba(0, 168, 181, 0.2);
@@ -60,6 +64,8 @@
   --bg-primary: hsl(224, 25%, 12%);
   --bg-secondary: hsl(224, 25%, 16%);
   --bg-tertiary: hsl(224, 25%, 20%);
+  --bg-card: hsl(224, 25%, 16%);
+  --modal-overlay-bg: rgba(12, 16, 26, 0.75);
   --text-primary: hsl(210, 40%, 98%);
   --text-secondary: hsl(215, 20%, 75%);
   --text-muted: hsl(215, 15%, 50%);
@@ -1176,7 +1182,7 @@ h1, h2, h3, h4, h5, h6 {
   left: 0;
   width: 100%;
   height: 100%;
-  background-color: rgba(0, 0, 0, 0.6);
+  background-color: var(--modal-overlay-bg);
   backdrop-filter: blur(10px);
   z-index: 1000;
   display: none;
@@ -2035,13 +2041,13 @@ h1, h2, h3, h4, h5, h6 {
 
 .toast-notification {
   pointer-events: auto;
-  background: rgba(15, 23, 42, 0.95);
+  background: var(--bg-secondary);
   backdrop-filter: blur(12px);
   border: 1px solid var(--border);
-  color: #ffffff;
+  color: var(--text-primary);
   padding: 14px 18px;
   border-radius: var(--radius-md);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--card-shadow);
   display: flex;
   align-items: center;
   gap: 12px;
@@ -2080,14 +2086,14 @@ h1, h2, h3, h4, h5, h6 {
 
 /* ═══════════ CUSTOM CONFIRMATION MODAL ═══════════ */
 .confirm-modal-card {
-  background: var(--bg-card);
+  background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 24px;
   width: 100%;
   max-width: 400px;
   text-align: center;
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--card-shadow);
   animation: modalScaleIn 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -2129,8 +2135,8 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .confirm-modal-card p {
-  font-size: 13px;
-  color: var(--text-muted);
+  font-size: 13.5px;
+  color: var(--text-secondary);
   line-height: 1.5;
   margin-bottom: 20px;
 }
@@ -2142,5 +2148,51 @@ h1, h2, h3, h4, h5, h6 {
 
 .confirm-modal-actions button {
   flex: 1;
+}
+
+.confirm-modal-actions .btn-outline {
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+
+.confirm-modal-actions .btn-outline:hover {
+  background-color: var(--hover-bg);
+}
+
+/* ═══════════ MOBILE VIEW OPTIMIZATIONS ═══════════ */
+@media (max-width: 640px) {
+  .request-action-banner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 14px 16px;
+  }
+  
+  .request-banner-info {
+    width: 100%;
+  }
+
+  .request-banner-actions {
+    width: 100%;
+    display: flex;
+    gap: 10px;
+  }
+
+  .request-banner-actions button {
+    flex: 1;
+    justify-content: center;
+  }
+
+  .backup-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .storage-actions {
+    flex-direction: column;
+  }
+
+  .storage-actions button {
+    width: 100%;
+  }
 }
 
