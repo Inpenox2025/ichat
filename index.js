@@ -371,6 +371,26 @@ async function sendE2EEMessage(recipientUsername, bodyText, mediaData = null) {
   const timestamp = new Date().toISOString();
   const messageId = 'msg-' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
 
+  // Check Chat Request Status & Enforce 1-Message Initiation Limit
+  let chatItem = state.chats.find(c => c.username === recipientUsername);
+  if (!chatItem) {
+    chatItem = { username: recipientUsername, email: '', status: 'pending_outgoing', unreadCount: 0 };
+    state.chats.push(chatItem);
+  } else if (!chatItem.status) {
+    chatItem.status = 'accepted';
+  }
+
+  if (chatItem.status === 'pending_outgoing') {
+    const countSent = state.messages.filter(m => m.chatPartner === recipientUsername && m.sender === state.user.username).length;
+    if (countSent >= 1) {
+      alert(`You can only send 1 initiation message until @${recipientUsername} accepts your request.`);
+      return;
+    }
+  } else if (chatItem.status === 'pending_incoming') {
+    alert(`Please accept the message request from @${recipientUsername} before replying.`);
+    return;
+  }
+
   // 1. Fetch public keys of recipient's devices and my other devices
   let recipientKeys, senderOtherKeys;
   try {
@@ -500,6 +520,20 @@ function flushOutboxQueue() {
 
 // Decrypting incoming messages
 async function handleIncomingMessage(data) {
+  // 0. Handle Chat Request Accepted signal
+  if (data.type === 'request-accepted') {
+    const partner = data.sender;
+    let chatItem = state.chats.find(c => c.username === partner);
+    if (chatItem) {
+      chatItem.status = 'accepted';
+      saveStateToLocalStorage();
+      renderChatList();
+      renderRequestsList();
+      renderActiveChat();
+    }
+    return;
+  }
+
   const { messageId, sender, recipient, keys, key, payload, timestamp, media, isSenderSync } = data;
   const partner = isSenderSync ? recipient : sender;
 
@@ -582,17 +616,19 @@ async function handleIncomingMessage(data) {
     state.messages.push(newMsgObj);
     
     // Add to chats list if new
-    if (!state.chats.some(c => c.username === partner)) {
-      state.chats.push({
+    let chatItem = state.chats.find(c => c.username === partner);
+    if (!chatItem) {
+      chatItem = {
         username: partner,
         email: '',
+        status: isSenderSync ? 'accepted' : 'pending_incoming',
         unreadCount: 0
-      });
+      };
+      state.chats.push(chatItem);
     }
 
     // Increment unread count if not currently viewing
     if (state.activeChatPartner !== partner) {
-      const chatItem = state.chats.find(c => c.username === partner);
       if (chatItem) chatItem.unreadCount = (chatItem.unreadCount || 0) + 1;
     } else {
       // Currently active, send read receipt automatically
@@ -602,6 +638,7 @@ async function handleIncomingMessage(data) {
 
     saveStateToLocalStorage();
     renderChatList();
+    renderRequestsList();
     renderActiveChat();
 
     // Trigger double check delivery ack back to sender (skip for self syncs)
@@ -1314,12 +1351,106 @@ function renderDeviceConflictList(email, code, devices) {
   document.getElementById('deviceConflictResolver').classList.add('active');
 }
 
-// Sidebar Chats list renderer
+// Accept incoming chat request
+async function acceptChatRequest(partnerUsername) {
+  let chatItem = state.chats.find(c => c.username === partnerUsername);
+  if (chatItem) {
+    chatItem.status = 'accepted';
+    saveStateToLocalStorage();
+
+    // Send request-accepted signal to initiator
+    const acceptPacket = {
+      type: 'request-accepted',
+      sender: state.user.username,
+      recipient: partnerUsername,
+      timestamp: new Date().toISOString()
+    };
+
+    if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+      state.socket.send(JSON.stringify(acceptPacket));
+    } else {
+      try {
+        await apiCall('/api/messages', 'POST', { recipient: partnerUsername, packet: acceptPacket });
+      } catch (e) {
+        console.warn('[REQUEST] Failed to send acceptance signal:', e);
+      }
+    }
+
+    renderChatList();
+    renderRequestsList();
+    renderActiveChat();
+  }
+}
+
+// Decline incoming chat request
+function declineChatRequest(partnerUsername) {
+  state.chats = state.chats.filter(c => c.username !== partnerUsername);
+  state.messages = state.messages.filter(m => m.chatPartner !== partnerUsername);
+  
+  if (state.activeChatPartner === partnerUsername) {
+    state.activeChatPartner = null;
+    document.getElementById('chatPane')?.classList.remove('active');
+    document.getElementById('chatEmptyState')?.classList.add('active');
+  }
+  
+  saveStateToLocalStorage();
+  renderChatList();
+  renderRequestsList();
+  renderActiveChat();
+}
+
+// Sidebar Requests list renderer (Bottom section)
+function renderRequestsList() {
+  const container = document.getElementById('requestsContainer');
+  const badge = document.getElementById('requestsCountBadge');
+  if (!container || !badge) return;
+
+  const pendingRequests = state.chats.filter(c => c && c.status === 'pending_incoming');
+  badge.innerText = pendingRequests.length;
+
+  if (pendingRequests.length === 0) {
+    container.innerHTML = '<div style="padding: 10px 16px; font-size: 11.5px; color: var(--text-muted);">No pending requests</div>';
+    return;
+  }
+
+  container.innerHTML = '';
+  pendingRequests.forEach(chat => {
+    const lastMsg = state.messages.filter(m => m.chatPartner === chat.username).slice(-1)[0];
+    const displayMsg = lastMsg 
+      ? (lastMsg.media ? `📷 ${lastMsg.media.filename}` : (lastMsg.body || '')) 
+      : 'New Message Request';
+    const avatarInitial = (chat.username || 'C').substring(0, 2).toUpperCase();
+
+    const item = document.createElement('div');
+    item.className = `request-item ${state.activeChatPartner === chat.username ? 'active' : ''}`;
+    item.innerHTML = `
+      <div class="request-item-user">
+        <div class="request-avatar">${avatarInitial}</div>
+        <div class="request-user-info">
+          <h5>@${chat.username}</h5>
+          <p style="max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${displayMsg}</p>
+        </div>
+      </div>
+      <span class="request-tag">Request</span>
+    `;
+
+    item.addEventListener('click', () => {
+      openConversation(chat.username);
+    });
+
+    container.appendChild(item);
+  });
+}
+
+// Sidebar Chats list renderer (Main chats)
 function renderChatList() {
   const container = document.getElementById('chatsContainer');
   container.innerHTML = '';
 
-  if (state.chats.length === 0) {
+  // Main chats list contains accepted chats and pending outgoing chats
+  const mainChats = state.chats.filter(c => c && (c.status === 'accepted' || c.status === 'pending_outgoing' || !c.status));
+
+  if (mainChats.length === 0) {
     container.innerHTML = `
       <div class="chat-list-empty">
         <i data-feather="users" class="empty-icon"></i>
@@ -1327,12 +1458,13 @@ function renderChatList() {
         <span>Add a contact above to begin encrypting.</span>
       </div>
     `;
+    renderRequestsList();
     feather.replace();
     return;
   }
 
   // Sort chats by last message timestamp
-  const sortedChats = [...state.chats].sort((a, b) => {
+  const sortedChats = [...mainChats].sort((a, b) => {
     const lastA = state.messages.filter(m => m.chatPartner === a.username).slice(-1)[0];
     const lastB = state.messages.filter(m => m.chatPartner === b.username).slice(-1)[0];
     const timeA = lastA ? new Date(lastA.timestamp) : new Date(0);
@@ -1353,6 +1485,8 @@ function renderChatList() {
 
     const avatarInitial = (chat.username || 'C').substring(0, 2).toUpperCase();
 
+    const isPendingOutgoing = chat.status === 'pending_outgoing';
+
     const item = document.createElement('div');
     item.className = `chat-list-item ${state.activeChatPartner === chat.username ? 'active' : ''}`;
     
@@ -1362,7 +1496,7 @@ function renderChatList() {
       </div>
       <div class="chat-item-info">
         <div class="chat-item-header">
-          <h4>@${chat.username}</h4>
+          <h4>@${chat.username} ${isPendingOutgoing ? '<span class="pending-tag">Pending</span>' : ''}</h4>
           <span class="chat-item-time">${displayTime}</span>
         </div>
         <div class="chat-item-body">
@@ -1382,6 +1516,8 @@ function renderChatList() {
 
     container.appendChild(item);
   });
+
+  renderRequestsList();
   feather.replace();
 }
 
@@ -1547,6 +1683,70 @@ async function renderActiveChat() {
   // Adjust scroll positions
   if (scrollAtBottom) {
     history.scrollTop = history.scrollHeight;
+  }
+
+  // Update Request Action Banner and Input Bar Lock States
+  const currentChat = state.chats.find(c => c && c.username === state.activeChatPartner);
+  const banner = document.getElementById('requestActionBanner');
+  const noticeBar = document.getElementById('requestNoticeBar');
+  const inputBar = document.getElementById('chatInputBar');
+  const textInput = document.getElementById('messageTextInput');
+  const sendBtn = document.getElementById('btnSendMessage');
+  const attachBtn = document.getElementById('btnAttachFile');
+
+  if (currentChat && currentChat.status === 'pending_incoming') {
+    if (banner) {
+      banner.style.display = 'flex';
+      const bannerTitle = document.getElementById('requestBannerTitle');
+      const bannerSub = document.getElementById('requestBannerSubtitle');
+      if (bannerTitle) bannerTitle.innerText = `Message Request from @${currentChat.username}`;
+      if (bannerSub) bannerSub.innerText = `Do you want to let @${currentChat.username} message you?`;
+    }
+    if (noticeBar) noticeBar.style.display = 'none';
+    if (inputBar) inputBar.classList.add('disabled');
+    if (textInput) {
+      textInput.disabled = true;
+      textInput.placeholder = `Accept request from @${currentChat.username} to reply...`;
+    }
+    if (sendBtn) sendBtn.disabled = true;
+    if (attachBtn) attachBtn.disabled = true;
+  } else if (currentChat && currentChat.status === 'pending_outgoing') {
+    const countSent = state.messages.filter(m => m.chatPartner === state.activeChatPartner && m.sender === state.user.username).length;
+    if (countSent >= 1) {
+      if (banner) banner.style.display = 'none';
+      if (noticeBar) {
+        noticeBar.style.display = 'flex';
+        const noticeText = document.getElementById('requestNoticeText');
+        if (noticeText) noticeText.innerText = `Waiting for @${currentChat.username} to accept your request before sending more messages.`;
+      }
+      if (inputBar) inputBar.classList.add('disabled');
+      if (textInput) {
+        textInput.disabled = true;
+        textInput.placeholder = `Waiting for @${currentChat.username} to accept...`;
+      }
+      if (sendBtn) sendBtn.disabled = true;
+      if (attachBtn) attachBtn.disabled = true;
+    } else {
+      if (banner) banner.style.display = 'none';
+      if (noticeBar) noticeBar.style.display = 'none';
+      if (inputBar) inputBar.classList.remove('disabled');
+      if (textInput) {
+        textInput.disabled = false;
+        textInput.placeholder = 'Type a message...';
+      }
+      if (sendBtn) sendBtn.disabled = false;
+      if (attachBtn) attachBtn.disabled = false;
+    }
+  } else {
+    if (banner) banner.style.display = 'none';
+    if (noticeBar) noticeBar.style.display = 'none';
+    if (inputBar) inputBar.classList.remove('disabled');
+    if (textInput) {
+      textInput.disabled = false;
+      textInput.placeholder = 'Type a message...';
+    }
+    if (sendBtn) sendBtn.disabled = false;
+    if (attachBtn) attachBtn.disabled = false;
   }
   
   feather.replace();
@@ -1958,6 +2158,26 @@ document.addEventListener('DOMContentLoaded', async () => {
       sendTypingIndicator(state.activeChatPartner, false);
     }
   };
+
+  // Message Request Buttons (Accept & Decline)
+  const btnAcceptReq = document.getElementById('btnAcceptRequest');
+  const btnDeclineReq = document.getElementById('btnDeclineRequest');
+
+  if (btnAcceptReq) {
+    btnAcceptReq.addEventListener('click', () => {
+      if (state.activeChatPartner) {
+        acceptChatRequest(state.activeChatPartner);
+      }
+    });
+  }
+
+  if (btnDeclineReq) {
+    btnDeclineReq.addEventListener('click', () => {
+      if (state.activeChatPartner) {
+        declineChatRequest(state.activeChatPartner);
+      }
+    });
+  }
 
   sendBtn.addEventListener('click', triggerSendText);
   textInput.addEventListener('keydown', (e) => {

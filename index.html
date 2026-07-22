@@ -179,6 +179,20 @@
               <span>Add a contact above to begin encrypting.</span>
             </div>
           </div>
+
+          <!-- Message Requests Section at Bottom -->
+          <div class="requests-section" id="requestsSection">
+            <div class="requests-header" id="requestsHeaderToggle">
+              <div class="requests-header-title">
+                <i data-feather="inbox"></i>
+                <span>Message Requests</span>
+              </div>
+              <span class="requests-badge" id="requestsCountBadge">0</span>
+            </div>
+            <div class="requests-list" id="requestsContainer">
+              <!-- Pending incoming requests populate dynamically -->
+            </div>
+          </div>
         </aside>
 
         <!-- 3B. MAIN CHAT WINDOW -->
@@ -228,8 +242,33 @@
               <!-- Messages load dynamically -->
             </div>
 
+            <!-- Request Action Banner (for Recipient) -->
+            <div class="request-action-banner" id="requestActionBanner" style="display: none;">
+              <div class="request-banner-info">
+                <i data-feather="user-plus" class="request-banner-icon"></i>
+                <div>
+                  <h4 id="requestBannerTitle">Message Request</h4>
+                  <p id="requestBannerSubtitle">Do you want to let this user message you?</p>
+                </div>
+              </div>
+              <div class="request-banner-actions">
+                <button type="button" class="btn btn-primary btn-sm" id="btnAcceptRequest">
+                  <i data-feather="check"></i> Accept Request
+                </button>
+                <button type="button" class="btn btn-outline btn-danger btn-sm" id="btnDeclineRequest">
+                  <i data-feather="x"></i> Decline
+                </button>
+              </div>
+            </div>
+
+            <!-- Pending Request Notice Bar (for Sender) -->
+            <div class="request-notice-bar" id="requestNoticeBar" style="display: none;">
+              <i data-feather="clock"></i>
+              <span id="requestNoticeText">Waiting for recipient to accept your message request before sending more messages.</span>
+            </div>
+
             <!-- Input Bar -->
-            <div class="chat-input-bar">
+            <div class="chat-input-bar" id="chatInputBar">
               <div class="chat-attachment-wrapper">
                 <button class="icon-btn attach-btn" id="btnAttachFile" title="Attach Media">
                   <i data-feather="paperclip"></i>
