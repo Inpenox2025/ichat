@@ -1377,6 +1377,18 @@ h1, h2, h3, h4, h5, h6 {
   stroke: var(--color-danger);
 }
 
+.danger-zone-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.danger-zone-actions button {
+  flex: 1;
+  padding: 10px 14px;
+  white-space: nowrap;
+}
+
 /* Conflict resolution modal overlay inner card */
 .conflict-resolver {
   position: absolute;
@@ -2194,6 +2206,14 @@ h1, h2, h3, h4, h5, h6 {
   .storage-actions button {
     width: 100%;
   }
+
+  .danger-zone-actions {
+    flex-direction: column;
+  }
+
+  .danger-zone-actions button {
+    width: 100%;
+  }
 }
 
 /* ═══════════ MULTI-SELECT & BULK ACTIONS ═══════════ */
@@ -2411,6 +2431,37 @@ h1, h2, h3, h4, h5, h6 {
   .request-user-info p {
     font-size: 11px;
     max-width: 110px;
+  }
+}
+
+/* ═══════════ ULTRA-NARROW MOBILE SCREENS (<= 360px) ═══════════ */
+@media (max-width: 360px) {
+  .selection-action-bar {
+    padding: 6px 8px;
+    gap: 4px;
+  }
+
+  .selection-info {
+    gap: 4px;
+    font-size: 11px;
+  }
+
+  .selection-info .icon-btn {
+    width: 24px;
+    height: 24px;
+  }
+
+  .selection-actions {
+    gap: 3px;
+  }
+
+  .selection-actions .btn-xs {
+    padding: 4px 6px;
+    font-size: 10px;
+  }
+
+  .selection-actions .btn-text {
+    display: none;
   }
 }
 

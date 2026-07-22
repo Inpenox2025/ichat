@@ -165,12 +165,12 @@
                   <button type="button" class="icon-btn" id="btnExitChatsSelection" title="Cancel Selection">
                     <i data-feather="x"></i>
                   </button>
-                  <span id="chatsSelectedCount">0 Selected</span>
+                  <span id="chatsSelectedCount" class="selection-count-text">0 Selected</span>
                 </div>
                 <div class="selection-actions">
-                  <button type="button" class="btn btn-outline btn-xs" id="btnSelectAllChats">Select All</button>
+                  <button type="button" class="btn btn-outline btn-xs" id="btnSelectAllChats">All</button>
                   <button type="button" class="btn btn-danger btn-xs" id="btnDeleteSelectedChats" title="Delete Selected Chats">
-                    <i data-feather="trash-2"></i> Delete
+                    <i data-feather="trash-2"></i> <span class="btn-text">Delete</span>
                   </button>
                 </div>
               </div>
@@ -210,15 +210,15 @@
                   <button type="button" class="icon-btn" id="btnExitRequestsSelection" title="Cancel Selection">
                     <i data-feather="x"></i>
                   </button>
-                  <span id="requestsSelectedCount">0 Selected</span>
+                  <span id="requestsSelectedCount" class="selection-count-text">0 Selected</span>
                 </div>
                 <div class="selection-actions">
                   <button type="button" class="btn btn-outline btn-xs" id="btnSelectAllRequests">All</button>
-                  <button type="button" class="btn btn-primary btn-xs" id="btnAcceptSelectedRequests">
-                    <i data-feather="check"></i> Accept
+                  <button type="button" class="btn btn-primary btn-xs" id="btnAcceptSelectedRequests" title="Accept Selected">
+                    <i data-feather="check"></i> <span class="btn-text">Accept</span>
                   </button>
-                  <button type="button" class="btn btn-danger btn-xs" id="btnDeclineSelectedRequests">
-                    <i data-feather="x"></i> Decline
+                  <button type="button" class="btn btn-danger btn-xs" id="btnDeclineSelectedRequests" title="Decline Selected">
+                    <i data-feather="x"></i> <span class="btn-text">Decline</span>
                   </button>
                 </div>
               </div>
@@ -454,11 +454,11 @@
           <div class="settings-section danger-zone">
             <h3><i data-feather="user"></i> Account Session</h3>
             <p class="section-desc">Log out of your active session or permanently erase your user profile from the server registry.</p>
-            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-              <button type="button" class="btn btn-outline" id="btnModalLogout" style="flex: 1; padding: 10px;">
+            <div class="danger-zone-actions">
+              <button type="button" class="btn btn-outline" id="btnModalLogout">
                 <i data-feather="log-out"></i> Log Out
               </button>
-              <button type="button" class="btn btn-danger" id="btnDeleteAccount" style="flex: 1; padding: 10px;">
+              <button type="button" class="btn btn-danger" id="btnDeleteAccount">
                 <i data-feather="user-x"></i> Delete Profile
               </button>
             </div>
