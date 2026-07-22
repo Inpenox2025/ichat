@@ -1,0 +1,29 @@
+{
+  "buildCommand": "",
+  "outputDirectory": ".",
+  "cleanUrls": true,
+  "rewrites": [
+    { "source": "/api/setup", "destination": "/api/setup" },
+    { "source": "/api/auth/request-otp", "destination": "/api/auth?action=request-otp" },
+    { "source": "/api/auth/verify-otp", "destination": "/api/auth?action=verify-otp" },
+    { "source": "/api/auth/register-username", "destination": "/api/auth?action=register-username" },
+    { "source": "/api/auth/me", "destination": "/api/auth?action=me" },
+    { "source": "/api/auth/delete-account", "destination": "/api/auth?action=delete-account" },
+    { "source": "/api/users/search", "destination": "/api/users?action=search" },
+    { "source": "/api/users/keys", "destination": "/api/users?action=keys" },
+    { "source": "/api/backup/upload", "destination": "/api/backup" },
+    { "source": "/api/backup/download", "destination": "/api/backup" },
+    { "source": "/api/upload", "destination": "/api/upload" },
+    { "source": "/api/messages", "destination": "/api/messages" }
+  ],
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET,POST,PUT,DELETE,OPTIONS" },
+        { "key": "Access-Control-Allow-Headers", "value": "Content-Type,Authorization" }
+      ]
+    }
+  ]
+}

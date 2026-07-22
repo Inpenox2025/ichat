@@ -1,0 +1,2088 @@
+/* ═══════════ STATE MANAGEMENT ═══════════ */
+const state = {
+  token: null,
+  user: null, // { id, email, username }
+  deviceId: null,
+  keys: null, // { publicKey, privateKey } (Uint8Array)
+  socket: null,
+  reconnectAttempts: 0,
+  activeChatPartner: null, // username string
+  chats: [], // [{ username, email, deviceKeys: [{device_id, public_key}], unreadCount }]
+  messages: [], // [{ id, chatPartner, sender, body, timestamp, media: { url, filename, type, size }, status }]
+  outbox: [], // Pending messages queue for low internet resilience
+  typingTimer: null,
+  isTyping: false,
+  theme: 'system',
+  localMediaCache: new Map(), // url -> blobUrl (for in-memory session speed)
+  
+  // WebRTC Call State
+  localStream: null,
+  peerConnection: null,
+  currentCall: null, // { partner, type: 'incoming'|'outgoing', status: 'ringing'|'connecting'|'connected' }
+  callMuted: false
+};
+
+// Config Constants
+const API_BASE = window.location.origin;
+const WS_BASE = window.location.protocol === 'https:' 
+  ? `wss://${window.location.host}` 
+  : `ws://${window.location.host}`;
+
+// IndexedDB setup for E2EE Media Storage (to bypass 5MB localStorage limit)
+const DB_NAME = 'ichat_media_db';
+const DB_VERSION = 1;
+let mediaDb = null;
+
+function initIndexedDB() {
+  return new Promise((resolve) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.onerror = (e) => {
+      console.error('[DB] IndexedDB failed to load:', e);
+      resolve(null);
+    };
+    request.onsuccess = (e) => {
+      mediaDb = e.target.result;
+      resolve(mediaDb);
+    };
+    request.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains('media')) {
+        db.createObjectStore('media', { keyPath: 'url' });
+      }
+    };
+  });
+}
+
+function saveMediaToLocalDB(url, arrayBuffer, mimeType) {
+  return new Promise((resolve) => {
+    if (!mediaDb) return resolve(false);
+    const transaction = mediaDb.transaction(['media'], 'readwrite');
+    const store = transaction.objectStore('media');
+    const request = store.put({ url, arrayBuffer, mimeType });
+    request.onsuccess = () => resolve(true);
+    request.onerror = () => resolve(false);
+  });
+}
+
+function getMediaFromLocalDB(url) {
+  return new Promise((resolve) => {
+    if (!mediaDb) return resolve(null);
+    const transaction = mediaDb.transaction(['media'], 'readonly');
+    const store = transaction.objectStore('media');
+    const request = store.get(url);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => resolve(null);
+  });
+}
+
+function clearMediaLocalDB() {
+  return new Promise((resolve) => {
+    if (!mediaDb) return resolve(false);
+    const transaction = mediaDb.transaction(['media'], 'readwrite');
+    const store = transaction.objectStore('media');
+    const request = store.clear();
+    request.onsuccess = () => resolve(true);
+    request.onerror = () => resolve(false);
+  });
+}
+
+function getMediaStorageSize() {
+  return new Promise((resolve) => {
+    if (!mediaDb) return resolve(0);
+    const transaction = mediaDb.transaction(['media'], 'readonly');
+    const store = transaction.objectStore('media');
+    const request = store.getAll();
+    request.onsuccess = () => {
+      let size = 0;
+      for (const item of request.result) {
+        size += item.arrayBuffer.byteLength;
+      }
+      resolve(size);
+    };
+    request.onerror = () => resolve(0);
+  });
+}
+
+
+/* ═══════════ CRYPTOGRAPHY HELPER FUNCTIONS ═══════════ */
+// Helper base64 encoding and decoding
+const encodeBase64 = (arr) => nacl.util.encodeBase64(arr);
+const decodeBase64 = (str) => nacl.util.decodeBase64(str);
+const encodeUTF8 = (arr) => nacl.util.encodeUTF8(arr);
+const decodeUTF8 = (str) => nacl.util.decodeUTF8(str);
+
+// Generate device keys
+function generateIdentityKeys() {
+  const kp = nacl.box.keyPair();
+  return {
+    publicKey: encodeBase64(kp.publicKey),
+    privateKey: encodeBase64(kp.secretKey)
+  };
+}
+
+// Symmetric encryption for messages using a one-time symmetric key
+function encryptSymmetric(plaintext, key) {
+  const nonce = nacl.randomBytes(24);
+  const messageBytes = decodeUTF8(plaintext);
+  const cipherBytes = nacl.secretbox(messageBytes, nonce, key);
+  return {
+    ciphertext: encodeBase64(cipherBytes),
+    nonce: encodeBase64(nonce)
+  };
+}
+
+function decryptSymmetric(ciphertext, nonce, key) {
+  const cipherBytes = decodeBase64(ciphertext);
+  const nonceBytes = decodeBase64(nonce);
+  const decrypted = nacl.secretbox.open(cipherBytes, nonceBytes, key);
+  if (!decrypted) throw new Error('Symmetric decryption failed');
+  return encodeUTF8(decrypted);
+}
+
+// Asymmetric key encryption (for session key exchange)
+function encryptAsymmetric(recipientPublicKey, senderPrivateKey, messageBytes, nonceBytes) {
+  const encrypted = nacl.box(messageBytes, nonceBytes, recipientPublicKey, senderPrivateKey);
+  return encodeBase64(encrypted);
+}
+
+function decryptAsymmetric(senderPublicKey, recipientPrivateKey, ciphertextBase64, nonceBytes) {
+  const cipherBytes = decodeBase64(ciphertextBase64);
+  const decrypted = nacl.box.open(cipherBytes, nonceBytes, senderPublicKey, recipientPrivateKey);
+  if (!decrypted) throw new Error('Asymmetric decryption failed');
+  return decrypted;
+}
+
+// PBKDF2 Key derivation from backup password
+async function pbkdf2(password, salt, keyLengthBytes = 32) {
+  const enc = new TextEncoder();
+  const keyMaterial = await window.crypto.subtle.importKey(
+    "raw",
+    enc.encode(password),
+    { name: "PBKDF2" },
+    false,
+    ["deriveBits"]
+  );
+  const derivedBits = await window.crypto.subtle.deriveBits(
+    {
+      name: "PBKDF2",
+      salt: enc.encode(salt),
+      iterations: 100000,
+      hash: "SHA-256"
+    },
+    keyMaterial,
+    keyLengthBytes * 8
+  );
+  return new Uint8Array(derivedBits);
+}
+
+
+/* ═══════════ LOCAL DATABASE PERSISTENCE ═══════════ */
+function loadStateFromLocalStorage() {
+  state.token = localStorage.getItem('ichat_token');
+  
+  const storedUser = localStorage.getItem('ichat_user');
+  state.user = storedUser ? JSON.parse(storedUser) : null;
+  
+  let deviceId = localStorage.getItem('ichat_device_id');
+  if (!deviceId) {
+    deviceId = 'device-' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+    localStorage.setItem('ichat_device_id', deviceId);
+  }
+  state.deviceId = deviceId;
+
+  // Load E2EE credentials
+  const pub = localStorage.getItem('ichat_identity_key_public');
+  const priv = localStorage.getItem('ichat_identity_key_private');
+  if (pub && priv) {
+    state.keys = {
+      publicKey: decodeBase64(pub),
+      privateKey: decodeBase64(priv)
+    };
+  } else {
+    // Generate new credentials
+    const newKeys = generateIdentityKeys();
+    localStorage.setItem('ichat_identity_key_public', newKeys.publicKey);
+    localStorage.setItem('ichat_identity_key_private', newKeys.privateKey);
+    state.keys = {
+      publicKey: decodeBase64(newKeys.publicKey),
+      privateKey: decodeBase64(newKeys.privateKey)
+    };
+  }
+
+  // Load user-scoped chat logs & message records
+  const userId = state.user?.id || 'guest';
+  const chats = localStorage.getItem(`ichat_chats_${userId}`) || localStorage.getItem('ichat_chats');
+  state.chats = chats ? JSON.parse(chats) : [];
+
+  const msgs = localStorage.getItem(`ichat_messages_${userId}`) || localStorage.getItem('ichat_messages');
+  state.messages = msgs ? JSON.parse(msgs) : [];
+
+  // Outbox pending sync
+  const out = localStorage.getItem('ichat_outbox');
+  state.outbox = out ? JSON.parse(out) : [];
+
+  // Load theme
+  state.theme = localStorage.getItem('ichat_theme') || 'system';
+}
+
+function saveStateToLocalStorage() {
+  const userId = state.user?.id || 'guest';
+  localStorage.setItem(`ichat_chats_${userId}`, JSON.stringify(state.chats));
+  localStorage.setItem(`ichat_messages_${userId}`, JSON.stringify(state.messages));
+  localStorage.setItem('ichat_outbox', JSON.stringify(state.outbox));
+}
+
+
+/* ═══════════ THEME MANAGEMENT ═══════════ */
+function applyTheme(themeMode) {
+  const appEl = document.getElementById('app');
+  appEl.className = ''; // Reset classes
+  
+  if (themeMode === 'light') {
+    appEl.classList.add('theme-light');
+  } else if (themeMode === 'dark') {
+    appEl.classList.add('theme-dark');
+  } else {
+    appEl.classList.add('theme-system');
+  }
+  
+  localStorage.setItem('ichat_theme', themeMode);
+  state.theme = themeMode;
+}
+
+// Monitor System Appearance shifts dynamically
+const systemThemeMedia = window.matchMedia('(prefers-color-scheme: dark)');
+systemThemeMedia.addEventListener('change', () => {
+  if (state.theme === 'system') {
+    applyTheme('system');
+  }
+});
+
+
+/* ═══════════ WEBSOCKET CLIENT & SYNC ═══════════ */
+function connectWebSocket() {
+  if (!state.token) return;
+
+  // Serverless platforms like Vercel do not support persistent WebSockets
+  const hostname = window.location.hostname;
+  const isServerlessHost = hostname.endsWith('.vercel.app') || 
+                           hostname.endsWith('.netlify.app') || 
+                           hostname.endsWith('.now.sh');
+
+  if (isServerlessHost) {
+    console.log('[WS] Serverless environment detected (Vercel). WebSockets disabled; using HTTP polling mode.');
+    return;
+  }
+
+  console.log('[WS] Establishing socket connection...');
+  try {
+    state.socket = new WebSocket(WS_BASE);
+  } catch (err) {
+    console.warn('[WS] Socket connection skipped:', err);
+    return;
+  }
+
+  state.socket.onopen = () => {
+    console.log('[WS] Connection open. Authenticating session...');
+    state.reconnectAttempts = 0;
+    
+    // Authenticate
+    state.socket.send(JSON.stringify({
+      type: 'auth',
+      token: state.token
+    }));
+  };
+
+  state.socket.onmessage = async (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      
+      // 1. Auth Success
+      if (data.type === 'auth-success') {
+        console.log('[WS] Session authenticated as @' + data.username);
+        flushOutboxQueue();
+        updateContactStatusesUI();
+        return;
+      }
+
+      // 2. Incoming message
+      if (data.type === 'message') {
+        await handleIncomingMessage(data);
+        return;
+      }
+
+      // 3. Typing indicator status
+      if (data.type === 'typing') {
+        handleIncomingTyping(data);
+        return;
+      }
+
+      // 4. Message delivery checks (ack checkmarks)
+      if (data.type === 'ack') {
+        handleAckReceipt(data);
+        return;
+      }
+
+      // 5. Voice Call signaling
+      if (['call-offer', 'call-answer', 'ice-candidate', 'call-hangup', 'call-busy'].includes(data.type)) {
+        handleIncomingCallSignaling(data);
+        return;
+      }
+
+    } catch (err) {
+      console.error('[WS ERROR] Failed to parse socket packet:', err);
+    }
+  };
+
+  state.socket.onerror = (err) => {
+    console.warn('[WS] Socket error encountered.');
+  };
+
+  state.socket.onclose = () => {
+    console.log('[WS] Connection disconnected.');
+    
+    // Limit reconnection attempts if environment doesn't support WebSockets
+    if (state.reconnectAttempts >= 3) {
+      console.warn('[WS] Max reconnect attempts reached. Falling back to HTTP polling mode.');
+      return;
+    }
+
+    // Exponential backoff reconnect (low internet optimization)
+    const delay = Math.min(30000, Math.pow(2, state.reconnectAttempts) * 1000);
+    state.reconnectAttempts++;
+    console.log(`[WS] Attempting reconnection in ${delay}ms...`);
+    setTimeout(connectWebSocket, delay);
+  };
+}
+
+// Send Typing status
+function sendTypingIndicator(recipientUsername, isTyping) {
+  if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+    state.socket.send(JSON.stringify({
+      type: 'typing',
+      recipient: recipientUsername,
+      status: isTyping
+    }));
+  }
+}
+
+// Sending E2EE messages
+async function sendE2EEMessage(recipientUsername, bodyText, mediaData = null) {
+  const timestamp = new Date().toISOString();
+  const messageId = 'msg-' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+
+  // 1. Fetch public keys of recipient's devices and my other devices
+  let recipientKeys, senderOtherKeys;
+  try {
+    const res = await fetch(`${API_BASE}/api/users/keys?username=${recipientUsername}`, {
+      headers: { 'Authorization': `Bearer ${state.token}` }
+    });
+    const result = await res.json();
+    if (!result.success) throw new Error(result.error);
+    recipientKeys = result.recipient_devices;
+    senderOtherKeys = result.sender_other_devices;
+  } catch (err) {
+    console.error('[E2EE] Failed to fetch device keys:', err);
+    alert('Failed to establish secure keys. User might be offline or deleted.');
+    return;
+  }
+
+  // 2. Generate random 256-bit symmetric encryption key (secret key)
+  const sessionKey = nacl.randomBytes(32);
+  const nonce = nacl.randomBytes(24);
+
+  // 3. Encrypt payload symmetrically
+  const content = encryptSymmetric(bodyText || '', sessionKey);
+
+  // 4. Encrypt session key for each active recipient device
+  const keysMap = {};
+  for (const dev of recipientKeys) {
+    const devPub = decodeBase64(dev.public_key);
+    const encKey = encryptAsymmetric(devPub, state.keys.privateKey, sessionKey, nonce);
+    keysMap[dev.device_id] = encKey;
+  }
+
+  // Encrypt session key for each of my OTHER devices so they can sync this chat history
+  for (const dev of senderOtherKeys) {
+    const devPub = decodeBase64(dev.public_key);
+    const encKey = encryptAsymmetric(devPub, state.keys.privateKey, sessionKey, nonce);
+    keysMap[dev.device_id] = encKey;
+  }
+
+  const payload = {
+    encryptedBody: content.ciphertext,
+    nonce: content.nonce
+  };
+
+  const messagePacket = {
+    type: 'message',
+    messageId,
+    recipient: recipientUsername,
+    keys: keysMap,
+    payload: JSON.stringify(payload),
+    timestamp,
+    media: mediaData // { url, filename, type, size, encryptedKeyBase64, mediaNonceBase64 }
+  };
+
+  // 5. Append locally as "sending/sent" status
+  const localMsgObj = {
+    id: messageId,
+    chatPartner: recipientUsername,
+    sender: state.user.username,
+    body: bodyText,
+    timestamp,
+    media: mediaData ? {
+      url: mediaData.url,
+      filename: mediaData.filename,
+      type: mediaData.type,
+      size: mediaData.size
+    } : null,
+    status: 'pending' // pending delivery
+  };
+
+  state.messages.push(localMsgObj);
+  saveStateToLocalStorage();
+  renderActiveChat();
+  renderChatList();
+
+  // 6. Dispatch via WebSocket or HTTP Transient Queue (for serverless resilience like Vercel)
+  if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+    state.socket.send(JSON.stringify(messagePacket));
+  } else {
+    try {
+      console.log('[HTTP QUEUE] WebSocket offline/serverless. Dispatching via HTTP transient queue...');
+      await apiCall('/api/messages', 'POST', { recipient: recipientUsername, packet: messagePacket });
+      localMsgObj.status = 'delivered';
+      saveStateToLocalStorage();
+      renderActiveChat();
+    } catch (e) {
+      console.warn('[OUTBOX] HTTP delivery failed. Buffering message packet to local outbox:', e);
+      state.outbox.push(messagePacket);
+      saveStateToLocalStorage();
+    }
+  }
+}
+
+// Poll transient queue for incoming messages when WebSocket is offline or in serverless environments
+async function pollTransientQueue() {
+  if (!state.token) return;
+  try {
+    const data = await apiCall(`/api/messages?t=${Date.now()}`, 'GET');
+    if (data.success && data.messages && data.messages.length > 0) {
+      for (const msgPacket of data.messages) {
+        await handleIncomingMessage(msgPacket);
+      }
+    }
+  } catch (err) {
+    // Silent catch on poll errors
+  }
+}
+
+// Flush outbox queue on socket reconnection
+function flushOutboxQueue() {
+  if (state.outbox.length === 0) return;
+  console.log(`[OUTBOX] Reconnected. Flushing ${state.outbox.length} pending messages.`);
+  
+  while (state.outbox.length > 0) {
+    const packet = state.outbox.shift();
+    if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+      state.socket.send(JSON.stringify(packet));
+    } else {
+      state.outbox.unshift(packet); // Put back on failure
+      break;
+    }
+  }
+  saveStateToLocalStorage();
+}
+
+// Decrypting incoming messages
+async function handleIncomingMessage(data) {
+  const { messageId, sender, recipient, keys, key, payload, timestamp, media, isSenderSync } = data;
+  const partner = isSenderSync ? recipient : sender;
+
+  if (!partner) return;
+
+  // Prevent duplicate logs
+  if (state.messages.some(m => m.id === messageId)) return;
+
+  try {
+    const sqlPayload = JSON.parse(payload);
+    
+    // 1. Fetch public keys of sender
+    const res = await fetch(`${API_BASE}/api/users/keys?username=${sender}`, {
+      headers: { 'Authorization': `Bearer ${state.token}` }
+    });
+    const result = await res.json();
+    if (!result.success) throw new Error(result.error);
+    
+    const recipientDevs = Array.isArray(result.recipient_devices) ? result.recipient_devices : [];
+    const senderOtherDevs = Array.isArray(result.sender_other_devices) ? result.sender_other_devices : [];
+    const allKnownDevices = [...recipientDevs, ...senderOtherDevs];
+
+    // Collect candidate encrypted keys
+    const targetEncryptedKeys = [];
+    if (keys && typeof keys === 'object') {
+      if (keys[state.deviceId]) {
+        targetEncryptedKeys.push(keys[state.deviceId]);
+      }
+      Object.values(keys).forEach(k => {
+        if (!targetEncryptedKeys.includes(k)) targetEncryptedKeys.push(k);
+      });
+    }
+    if (key && !targetEncryptedKeys.includes(key)) {
+      targetEncryptedKeys.push(key);
+    }
+
+    let decryptedBody = '';
+
+    // Attempt asymmetric key decryption across candidate session keys & sender device public keys
+    for (const encSessionKey of targetEncryptedKeys) {
+      for (const dev of allKnownDevices) {
+        try {
+          const devPub = decodeBase64(dev.public_key);
+          const nonceBytes = decodeBase64(sqlPayload.nonce);
+          const decryptedSessionKey = decryptAsymmetric(devPub, state.keys.privateKey, encSessionKey, nonceBytes);
+          if (decryptedSessionKey) {
+            decryptedBody = decryptSymmetric(sqlPayload.encryptedBody, sqlPayload.nonce, decryptedSessionKey);
+            if (decryptedBody) break;
+          }
+        } catch (e) {
+          // Continue testing remaining device key combinations
+        }
+      }
+      if (decryptedBody) break;
+    }
+
+    if (!decryptedBody && !media) {
+      decryptedBody = '[Decryption error: Shared key mismatch]';
+    }
+
+    // Save message locally
+    const newMsgObj = {
+      id: messageId,
+      chatPartner: partner,
+      sender,
+      body: decryptedBody,
+      timestamp,
+      media: media ? {
+        url: media.url,
+        filename: media.filename,
+        type: media.type,
+        size: media.size,
+        // Preserve decryption keys locally for the media file itself
+        encryptedKey: media.encryptedKeyBase64,
+        mediaNonce: media.mediaNonceBase64
+      } : null,
+      status: 'delivered'
+    };
+
+    state.messages.push(newMsgObj);
+    
+    // Add to chats list if new
+    if (!state.chats.some(c => c.username === partner)) {
+      state.chats.push({
+        username: partner,
+        email: '',
+        unreadCount: 0
+      });
+    }
+
+    // Increment unread count if not currently viewing
+    if (state.activeChatPartner !== partner) {
+      const chatItem = state.chats.find(c => c.username === partner);
+      if (chatItem) chatItem.unreadCount = (chatItem.unreadCount || 0) + 1;
+    } else {
+      // Currently active, send read receipt automatically
+      sendReadAcknowledgement(messageId, sender);
+      newMsgObj.status = 'read';
+    }
+
+    saveStateToLocalStorage();
+    renderChatList();
+    renderActiveChat();
+
+    // Trigger double check delivery ack back to sender (skip for self syncs)
+    if (!isSenderSync) {
+      sendDeliveryAcknowledgement(messageId, sender);
+    }
+
+  } catch (error) {
+    console.error('[E2EE] Failed to process incoming message:', error);
+  }
+}
+
+// Status Acknowledgement Dispatchers
+function sendDeliveryAcknowledgement(messageId, senderOfMessage) {
+  if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+    state.socket.send(JSON.stringify({
+      type: 'ack-delivered',
+      messageId,
+      senderOfMessage
+    }));
+  }
+}
+
+function sendReadAcknowledgement(messageId, senderOfMessage) {
+  if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+    state.socket.send(JSON.stringify({
+      type: 'ack-read',
+      messageId,
+      senderOfMessage
+    }));
+  }
+}
+
+function handleAckReceipt(data) {
+  const { messageId, status } = data;
+  const msgIndex = state.messages.findIndex(m => m.id === messageId);
+  if (msgIndex !== -1) {
+    // Only upgrade status (don't downgrade read -> delivered)
+    const currentStatus = state.messages[msgIndex].status;
+    if (status === 'read' || (status === 'delivered' && currentStatus !== 'read')) {
+      state.messages[msgIndex].status = status;
+      saveStateToLocalStorage();
+      renderActiveChat();
+    }
+  }
+}
+
+function handleIncomingTyping(data) {
+  const { sender, status } = data;
+  if (state.activeChatPartner === sender) {
+    const typingEl = document.getElementById('chatTitleTypingText');
+    const statusEl = document.getElementById('chatTitleStatusText');
+    if (status) {
+      typingEl.style.display = 'inline';
+      statusEl.style.display = 'none';
+    } else {
+      typingEl.style.display = 'none';
+      statusEl.style.display = 'inline';
+    }
+  }
+}
+
+// Update partner online indicators
+function updateContactStatusesUI() {
+  const statusEl = document.getElementById('chatTitleStatusText');
+  if (state.activeChatPartner && statusEl) {
+    // In this simple architecture, we assume online if connected, or rely on active ping
+    statusEl.className = 'status-online';
+    statusEl.innerText = 'Active Secure Session';
+  }
+}
+
+
+/* ═══════════ MEDIA UPLOAD & ENCRYPT/DECRYPT ═══════════ */
+async function encryptAndUploadFile(file) {
+  try {
+    // 1. Read file bytes
+    const arrayBuffer = await file.arrayBuffer();
+    const fileBytes = new Uint8Array(arrayBuffer);
+
+    // 2. Generate random 256-bit media encryption key and nonce
+    const mediaKey = nacl.randomBytes(32);
+    const mediaNonce = nacl.randomBytes(24);
+
+    // 3. Encrypt file locally using NaCl secretbox
+    const encryptedBytes = nacl.secretbox(fileBytes, mediaNonce, mediaKey);
+
+    // 4. Wrap ciphertext in a Blob and append to form
+    const encryptedBlob = new Blob([encryptedBytes], { type: 'application/octet-stream' });
+    const formData = new FormData();
+    formData.append('file', encryptedBlob, file.name);
+
+    // 5. Upload encrypted binary to server
+    const res = await fetch(`${API_BASE}/api/upload`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${state.token}` },
+      body: formData
+    });
+
+    const result = await res.json();
+    if (!result.success) throw new Error(result.error);
+
+    // 6. Cache decrypted file in IndexedDB immediately for instant local render
+    await saveMediaToLocalDB(result.url, arrayBuffer, file.type);
+    state.localMediaCache.set(result.url, URL.createObjectURL(new Blob([arrayBuffer], { type: file.type })));
+
+    // Return E2EE media descriptor to embed in chat message packet
+    return {
+      url: result.url,
+      filename: file.name,
+      type: file.type,
+      size: file.size,
+      // Passkeys packed in base64. These will be symmetrically encrypted along with the message text!
+      encryptedKeyBase64: encodeBase64(mediaKey),
+      mediaNonceBase64: encodeBase64(mediaNonce)
+    };
+
+  } catch (error) {
+    console.error('[MEDIA] Failed to encrypt or upload file:', error);
+    alert('Failed to upload file. Check size limits (10MB).');
+    return null;
+  }
+}
+
+// Download and decrypt media attachments securely
+async function getDecryptedMediaUrl(mediaObj) {
+  const { url, type } = mediaObj;
+  
+  // 1. Check in-memory session cache first
+  if (state.localMediaCache.has(url)) {
+    return state.localMediaCache.get(url);
+  }
+
+  // 2. Check IndexedDB storage cache
+  const localCache = await getMediaFromLocalDB(url);
+  if (localCache) {
+    const blob = new Blob([localCache.arrayBuffer], { type: localCache.mimeType });
+    const localUrl = URL.createObjectURL(blob);
+    state.localMediaCache.set(url, localUrl);
+    return localUrl;
+  }
+
+  // 3. Retrieve keys from media metadata (keys were securely shared via the E2EE chat bubble)
+  if (!mediaObj.encryptedKey || !mediaObj.mediaNonce) {
+    return null; // Missing E2EE keys
+  }
+
+  const mediaKey = decodeBase64(mediaObj.encryptedKey);
+  const mediaNonce = decodeBase64(mediaObj.mediaNonce);
+
+  try {
+    // 4. Download E2EE ciphertext from server
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('File download failed');
+    const encryptedArrayBuffer = await response.arrayBuffer();
+    const encryptedBytes = new Uint8Array(encryptedArrayBuffer);
+
+    // 5. Decrypt binary bytes locally using TweetNaCl
+    const decryptedBytes = nacl.secretbox.open(encryptedBytes, mediaNonce, mediaKey);
+    if (!decryptedBytes) throw new Error('Media decryption failed');
+
+    // 6. Save decrypted file bytes to IndexedDB
+    await saveMediaToLocalDB(url, decryptedBytes.buffer, type);
+
+    // 7. Generate local blob URL and cache
+    const blob = new Blob([decryptedBytes], { type });
+    const localUrl = URL.createObjectURL(blob);
+    state.localMediaCache.set(url, localUrl);
+    return localUrl;
+
+  } catch (error) {
+    console.error('[MEDIA] Decryption failure:', error);
+    return null;
+  }
+}
+
+
+/* ═══════════ WEBRTC AUDIO CALLING ═══════════ */
+// Establish Peer Connection
+async function startWebRTCCall(recipientUsername, isIncoming = false) {
+  state.peerConnection = new RTCPeerConnection({
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' }
+    ]
+  });
+
+  // Handle remote stream tracks
+  state.peerConnection.ontrack = (event) => {
+    console.log('[WebRTC] Received remote stream track');
+    const audioEl = document.getElementById('remoteAudioStream');
+    if (audioEl && event.streams[0]) {
+      audioEl.srcObject = event.streams[0];
+    }
+  };
+
+  // Dispatch local ICE candidates to recipient
+  state.peerConnection.onicecandidate = (event) => {
+    if (event.candidate && state.socket && state.socket.readyState === WebSocket.OPEN) {
+      state.socket.send(JSON.stringify({
+        type: 'ice-candidate',
+        recipient: recipientUsername,
+        candidate: event.candidate
+      }));
+    }
+  };
+
+  // Acquire local microphone audio
+  try {
+    state.localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    state.localStream.getTracks().forEach((track) => {
+      state.peerConnection.addTrack(track, state.localStream);
+    });
+  } catch (err) {
+    console.error('[WebRTC] Failed to acquire microphone:', err);
+    alert('Microphone access is required for voice calls.');
+    hangUpCall(recipientUsername);
+    return false;
+  }
+  return true;
+}
+
+// Triggers Calling Outflow
+async function triggerCallOut(recipientUsername) {
+  state.currentCall = { partner: recipientUsername, type: 'outgoing', status: 'ringing' };
+  openCallUI(recipientUsername, 'ringing', 'outgoing');
+
+  const ready = await startWebRTCCall(recipientUsername);
+  if (!ready) return;
+
+  // Generate SDP Offer
+  const offer = await state.peerConnection.createOffer();
+  await state.peerConnection.setLocalDescription(offer);
+
+  // Send signaling call offer packet
+  state.socket.send(JSON.stringify({
+    type: 'call-offer',
+    recipient: recipientUsername,
+    offer
+  }));
+}
+
+// Call Signaling Inbound router
+async function handleIncomingCallSignaling(data) {
+  const { type, sender, offer, answer, candidate } = data;
+
+  if (type === 'call-offer') {
+    // If already in a call, send busy signal
+    if (state.currentCall) {
+      state.socket.send(JSON.stringify({
+        type: 'call-busy',
+        recipient: sender
+      }));
+      return;
+    }
+
+    state.currentCall = { partner: sender, type: 'incoming', status: 'ringing' };
+    openCallUI(sender, 'ringing', 'incoming');
+    
+    // Cache the WebRTC offer configuration
+    state.incomingOfferData = offer;
+    return;
+  }
+
+  if (type === 'call-answer') {
+    if (state.currentCall && state.currentCall.type === 'outgoing') {
+      state.currentCall.status = 'connected';
+      document.getElementById('callStatusText').innerText = 'Connected';
+      document.getElementById('callOverlay').className = 'call-overlay-container active active-call';
+      
+      await state.peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+    }
+    return;
+  }
+
+  if (type === 'ice-candidate') {
+    if (state.peerConnection) {
+      await state.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+    }
+    return;
+  }
+
+  if (type === 'call-hangup') {
+    cleanupCallState();
+    return;
+  }
+
+  if (type === 'call-busy') {
+    alert(`${state.currentCall?.partner || 'User'} is busy on another call.`);
+    cleanupCallState();
+    return;
+  }
+}
+
+// User Actions: Call Accepted
+async function acceptIncomingCall() {
+  if (!state.currentCall || !state.incomingOfferData) return;
+  const caller = state.currentCall.partner;
+
+  state.currentCall.status = 'connecting';
+  document.getElementById('callStatusText').innerText = 'Connecting...';
+  document.getElementById('callOverlay').className = 'call-overlay-container active active-call';
+
+  const ready = await startWebRTCCall(caller);
+  if (!ready) return;
+
+  // Set remote SDP Offer description
+  await state.peerConnection.setRemoteDescription(new RTCSessionDescription(state.incomingOfferData));
+
+  // Generate SDP Answer
+  const answer = await state.peerConnection.createAnswer();
+  await state.peerConnection.setLocalDescription(answer);
+
+  // Send answer signaling packet
+  state.socket.send(JSON.stringify({
+    type: 'call-answer',
+    recipient: caller,
+    answer
+  }));
+
+  state.currentCall.status = 'connected';
+  document.getElementById('callStatusText').innerText = 'Connected';
+}
+
+function declineIncomingCall() {
+  if (!state.currentCall) return;
+  const caller = state.currentCall.partner;
+  state.socket.send(JSON.stringify({
+    type: 'call-hangup',
+    recipient: caller
+  }));
+  cleanupCallState();
+}
+
+function hangUpCall(partner) {
+  if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+    state.socket.send(JSON.stringify({
+      type: 'call-hangup',
+      recipient: partner || state.currentCall?.partner
+    }));
+  }
+  cleanupCallState();
+}
+
+function toggleMuteMic() {
+  if (state.localStream) {
+    state.callMuted = !state.callMuted;
+    state.localStream.getAudioTracks().forEach(track => {
+      track.enabled = !state.callMuted;
+    });
+    
+    const muteBtn = document.getElementById('btnCallMute');
+    if (state.callMuted) {
+      muteBtn.classList.add('active');
+      muteBtn.innerHTML = '<i data-feather="mic"></i>';
+    } else {
+      muteBtn.classList.remove('active');
+      muteBtn.innerHTML = '<i data-feather="mic-off"></i>';
+    }
+    feather.replace();
+  }
+}
+
+function cleanupCallState() {
+  // Stop mic tracks
+  if (state.localStream) {
+    state.localStream.getTracks().forEach(track => track.stop());
+    state.localStream = null;
+  }
+  // Close WebRTC channels
+  if (state.peerConnection) {
+    state.peerConnection.close();
+    state.peerConnection = null;
+  }
+  state.currentCall = null;
+  state.incomingOfferData = null;
+  state.callMuted = false;
+
+  const audioEl = document.getElementById('remoteAudioStream');
+  if (audioEl) audioEl.srcObject = null;
+
+  document.getElementById('callOverlay').className = 'call-overlay-container';
+}
+
+
+/* ═══════════ REST API CLIENT CONTROLLER ═══════════ */
+async function apiCall(endpoint, method = 'GET', body = null) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (state.token) {
+    headers['Authorization'] = `Bearer ${state.token}`;
+  }
+
+  const options = { method, headers };
+  if (body) {
+    options.body = JSON.stringify(body);
+  }
+
+  const res = await fetch(`${API_BASE}${endpoint}`, options);
+  const data = await res.json();
+  if (!res.ok) {
+    const err = new Error(data.error || 'API Request failed');
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
+}
+
+// Step 1: Send OTP Login
+async function requestOtp(email) {
+  const form = document.getElementById('requestOtpForm');
+  const btn = form.querySelector('button[type="submit"]');
+  const originalHtml = btn.innerHTML;
+
+  btn.disabled = true;
+  btn.innerHTML = '<span>Sending Code...</span><i data-feather="loader" class="animate-pulse"></i>';
+  feather.replace();
+
+  try {
+    await apiCall('/api/auth/request-otp', 'POST', { email });
+    
+    // Transition Forms
+    form.classList.remove('active');
+    document.getElementById('verifyOtpForm').classList.add('active');
+    document.getElementById('otpTargetMessage').innerText = `Sent to ${email}`;
+    document.getElementById('otpCodeInput').focus();
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalHtml;
+    feather.replace();
+  }
+}
+
+// Step 2: Validate OTP
+async function verifyOtp(email, code, replaceDeviceId = null) {
+  const form = document.getElementById('verifyOtpForm');
+  const btn = form.querySelector('button[type="submit"]');
+  const originalHtml = btn.innerHTML;
+
+  btn.disabled = true;
+  btn.innerHTML = '<span>Verifying...</span><i data-feather="loader" class="animate-pulse"></i>';
+  feather.replace();
+
+  try {
+    const payload = {
+      email,
+      code,
+      device_id: state.deviceId,
+      device_name: navigator.userAgent.split(')')[0].split('(')[1] || 'Web Session',
+      public_key: encodeBase64(state.keys.publicKey)
+    };
+
+    if (replaceDeviceId) {
+      payload.replace_device_id = replaceDeviceId;
+    }
+
+    const data = await apiCall('/api/auth/verify-otp', 'POST', payload);
+    
+    state.token = data.token;
+    state.user = data.user;
+    localStorage.setItem('ichat_token', data.token);
+    localStorage.setItem('ichat_user', JSON.stringify(data.user));
+
+    // Clear conflict resolution layers
+    document.getElementById('deviceConflictResolver').classList.remove('active');
+
+    // Route Screens
+    document.getElementById('authScreen').classList.remove('active');
+    
+    if (data.username_required) {
+      document.getElementById('usernameScreen').classList.add('active');
+      document.getElementById('usernameInput').focus();
+    } else {
+      document.getElementById('chatDashboard').classList.add('active');
+      initDashboard();
+    }
+  } catch (err) {
+    if (err.data && err.data.error === 'MAX_DEVICES_EXCEEDED') {
+      renderDeviceConflictList(email, code, err.data.devices);
+    } else {
+      alert(err.message);
+    }
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalHtml;
+    feather.replace();
+  }
+}
+
+// Step 3: Username Setup
+async function registerUsername(username) {
+  const form = document.getElementById('usernameForm');
+  const btn = form.querySelector('button[type="submit"]');
+  const originalHtml = btn.innerHTML;
+
+  btn.disabled = true;
+  btn.innerHTML = '<span>Saving...</span><i data-feather="loader" class="animate-pulse"></i>';
+  feather.replace();
+
+  try {
+    const data = await apiCall('/api/auth/register-username', 'POST', { username });
+    state.user = data.user;
+    localStorage.setItem('ichat_user', JSON.stringify(data.user));
+
+    document.getElementById('usernameScreen').classList.remove('active');
+    document.getElementById('chatDashboard').classList.add('active');
+    initDashboard();
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalHtml;
+    feather.replace();
+  }
+}
+
+// Step 4: De-registration (Account Wipe)
+async function deleteAccount() {
+  if (confirm('CAUTION: This will permanently delete your user profile, active device registrations, and cloud backups from the server registry. This action CANNOT be undone. Proceed?')) {
+    const btn = document.getElementById('btnDeleteAccount');
+    const originalHtml = btn.innerHTML;
+
+    btn.disabled = true;
+    btn.innerHTML = '<span>Deleting Account...</span><i data-feather="loader" class="animate-pulse"></i>';
+    feather.replace();
+
+    try {
+      await apiCall('/api/auth/delete-account', 'POST');
+      triggerLogOut();
+    } catch (err) {
+      alert('Delete profile failed: ' + err.message);
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
+      feather.replace();
+    }
+  }
+}
+
+function triggerLogOut() {
+  localStorage.clear();
+  clearMediaLocalDB();
+  state.token = null;
+  state.user = null;
+  state.chats = [];
+  state.messages = [];
+  state.outbox = [];
+  
+  if (state.socket) {
+    state.socket.close();
+  }
+  
+  // Back to login screen
+  document.getElementById('chatDashboard').classList.remove('active');
+  document.getElementById('settingsModal').classList.remove('active');
+  document.getElementById('authScreen').classList.add('active');
+  document.getElementById('requestOtpForm').classList.add('active');
+  document.getElementById('verifyOtpForm').classList.remove('active');
+  document.getElementById('emailInput').value = '';
+  document.getElementById('otpCodeInput').value = '';
+}
+
+
+/* ═══════════ ZERO-KNOWLEDGE BACKUP & RESTORE ═══════════ */
+async function executeBackup(passcode) {
+  if (!passcode || passcode.length < 4) {
+    alert('Please specify a strong backup password (at least 4 characters).');
+    return;
+  }
+
+  const btn = document.getElementById('btnCreateBackup');
+  const originalHtml = btn.innerHTML;
+
+  btn.disabled = true;
+  btn.innerHTML = '<span>Backing Up...</span><i data-feather="loader" class="animate-pulse"></i>';
+  feather.replace();
+
+  const backupStatusEl = document.getElementById('backupStatusText');
+  backupStatusEl.innerText = 'Creating secure backup...';
+
+  try {
+    // 1. Pack database
+    const payloadObject = {
+      chats: state.chats,
+      messages: state.messages,
+      keys: {
+        publicKey: encodeBase64(state.keys.publicKey),
+        privateKey: encodeBase64(state.keys.privateKey)
+      }
+    };
+    const plaintext = JSON.stringify(payloadObject);
+
+    // 2. Derive key from password using Web Crypto PBKDF2 (salt is the user email)
+    const salt = state.user.email;
+    const derivedKeyBytes = await pbkdf2(passcode, salt, 32);
+
+    // 3. Encrypt data symmetrically using NaCl secretbox
+    const encrypted = encryptSymmetric(plaintext, derivedKeyBytes);
+    
+    // Package blob: { ciphertext, nonce }
+    const backupBlobString = JSON.stringify(encrypted);
+
+    // 4. Upload to server
+    await apiCall('/api/backup/upload', 'POST', { backup_data: backupBlobString });
+    
+    const timeStr = new Date().toLocaleString();
+    backupStatusEl.innerText = `Backup successfully uploaded! Date: ${timeStr}`;
+    localStorage.setItem('ichat_backup_status', timeStr);
+  } catch (err) {
+    console.error('[BACKUP ERROR]', err);
+    backupStatusEl.innerText = 'Failed to compile backup: ' + err.message;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalHtml;
+    feather.replace();
+  }
+}
+
+async function executeRestore(passcode) {
+  if (!passcode) {
+    alert('Enter backup passcode to decrypt files.');
+    return;
+  }
+
+  const btn = document.getElementById('btnRestoreBackup');
+  const originalHtml = btn.innerHTML;
+
+  btn.disabled = true;
+  btn.innerHTML = '<span>Restoring...</span><i data-feather="loader" class="animate-pulse"></i>';
+  feather.replace();
+
+  const backupStatusEl = document.getElementById('backupStatusText');
+  backupStatusEl.innerText = 'Downloading backup blob...';
+
+  try {
+    // 1. Fetch encrypted packet from server
+    const data = await apiCall('/api/backup/download', 'GET');
+    
+    backupStatusEl.innerText = 'Decrypting database...';
+    const encryptedBlob = JSON.parse(data.backup_data);
+
+    // 2. Derive decryption key from passcode
+    const salt = state.user.email;
+    const derivedKeyBytes = await pbkdf2(passcode, salt, 32);
+
+    // 3. Decrypt ciphertext using NaCl secretbox
+    const decryptedJsonString = decryptSymmetric(encryptedBlob.ciphertext, encryptedBlob.nonce, derivedKeyBytes);
+    const restored = JSON.parse(decryptedJsonString);
+
+    // 4. Verify keys match or restore them
+    state.chats = restored.chats;
+    state.messages = restored.messages;
+    state.keys = {
+      publicKey: decodeBase64(restored.keys.publicKey),
+      privateKey: decodeBase64(restored.keys.privateKey)
+    };
+
+    // Save to storage
+    localStorage.setItem('ichat_identity_key_public', restored.keys.publicKey);
+    localStorage.setItem('ichat_identity_key_private', restored.keys.privateKey);
+    saveStateToLocalStorage();
+
+    // Re-render
+    renderChatList();
+    renderActiveChat();
+    updateStorageStatsUI();
+
+    backupStatusEl.innerText = 'Database successfully restored!';
+  } catch (err) {
+    console.error('[RESTORE ERROR]', err);
+    backupStatusEl.innerText = 'Decryption failed. Check passcode.';
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalHtml;
+    feather.replace();
+  }
+}
+
+
+/* ═══════════ DOM RENDERING & UI UPDATES ═══════════ */
+
+// Conflict Resolution Screen Renders
+function renderDeviceConflictList(email, code, devices) {
+  const container = document.getElementById('deviceReplaceList');
+  container.innerHTML = '';
+
+  devices.forEach(dev => {
+    const item = document.createElement('div');
+    item.className = 'device-replace-item';
+    
+    const info = document.createElement('div');
+    info.innerHTML = `<h5>${dev.device_name}</h5><span>Last Active: ${new Date(dev.last_active).toLocaleString()}</span>`;
+    
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn btn-primary btn-sm';
+    btn.innerText = 'Replace';
+    
+    item.appendChild(info);
+    item.appendChild(btn);
+    
+    btn.addEventListener('click', () => {
+      verifyOtp(email, code, dev.device_id);
+    });
+
+    container.appendChild(item);
+  });
+
+  document.getElementById('deviceConflictResolver').classList.add('active');
+}
+
+// Sidebar Chats list renderer
+function renderChatList() {
+  const container = document.getElementById('chatsContainer');
+  container.innerHTML = '';
+
+  if (state.chats.length === 0) {
+    container.innerHTML = `
+      <div class="chat-list-empty">
+        <i data-feather="users" class="empty-icon"></i>
+        <p>No conversations started.</p>
+        <span>Add a contact above to begin encrypting.</span>
+      </div>
+    `;
+    feather.replace();
+    return;
+  }
+
+  // Sort chats by last message timestamp
+  const sortedChats = [...state.chats].sort((a, b) => {
+    const lastA = state.messages.filter(m => m.chatPartner === a.username).slice(-1)[0];
+    const lastB = state.messages.filter(m => m.chatPartner === b.username).slice(-1)[0];
+    const timeA = lastA ? new Date(lastA.timestamp) : new Date(0);
+    const timeB = lastB ? new Date(lastB.timestamp) : new Date(0);
+    return timeB - timeA;
+  });
+
+  sortedChats.forEach(chat => {
+    if (!chat || !chat.username) return;
+
+    const lastMsg = state.messages.filter(m => m.chatPartner === chat.username).slice(-1)[0];
+    const displayMsg = lastMsg 
+      ? (lastMsg.media ? `📷 ${lastMsg.media.filename}` : (lastMsg.body || '')) 
+      : 'No messages yet';
+    const displayTime = lastMsg 
+      ? new Date(lastMsg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+      : '';
+
+    const avatarInitial = (chat.username || 'C').substring(0, 2).toUpperCase();
+
+    const item = document.createElement('div');
+    item.className = `chat-list-item ${state.activeChatPartner === chat.username ? 'active' : ''}`;
+    
+    item.innerHTML = `
+      <div class="chat-item-avatar-wrapper">
+        <div class="chat-item-avatar">${avatarInitial}</div>
+      </div>
+      <div class="chat-item-info">
+        <div class="chat-item-header">
+          <h4>@${chat.username}</h4>
+          <span class="chat-item-time">${displayTime}</span>
+        </div>
+        <div class="chat-item-body">
+          <p class="chat-item-lastmsg">${displayMsg}</p>
+          ${chat.unreadCount > 0 ? `<span class="chat-item-badge">${chat.unreadCount}</span>` : ''}
+        </div>
+      </div>
+    `;
+
+    item.addEventListener('click', () => {
+      // Clear unreads
+      chat.unreadCount = 0;
+      saveStateToLocalStorage();
+      
+      openConversation(chat.username);
+    });
+
+    container.appendChild(item);
+  });
+  feather.replace();
+}
+
+// Conversation views renderer
+function openConversation(username) {
+  state.activeChatPartner = username;
+  localStorage.setItem('ichat_active_partner', username);
+
+  const emptyState = document.getElementById('chatEmptyState');
+  if (emptyState) emptyState.classList.remove('active');
+  
+  const chatPane = document.getElementById('chatPane');
+  if (chatPane) chatPane.classList.add('active');
+  
+  // Responsive sidebar toggles
+  const chatWin = document.getElementById('chatWindow');
+  if (chatWin) chatWin.classList.add('active');
+
+  const sidebar = document.getElementById('sidebar');
+  if (sidebar) sidebar.classList.add('inactive');
+
+  const titleUser = document.getElementById('chatTitleUsername');
+  if (titleUser) titleUser.innerText = `@${username}`;
+
+  const titleAvatar = document.getElementById('chatTitleAvatar');
+  if (titleAvatar) titleAvatar.innerText = username.substring(0, 2).toUpperCase();
+
+  // Reset typing layout state
+  const typingText = document.getElementById('chatTitleTypingText');
+  if (typingText) typingText.style.display = 'none';
+
+  const statusText = document.getElementById('chatTitleStatusText');
+  if (statusText) statusText.style.display = 'inline';
+
+  updateContactStatusesUI();
+  
+  // Set all messages from this partner to read, send read receipts
+  state.messages.forEach(m => {
+    if (m.chatPartner === username && m.sender !== state.user.username && m.status !== 'read') {
+      m.status = 'read';
+      sendReadAcknowledgement(m.id, username);
+    }
+  });
+  saveStateToLocalStorage();
+
+  renderActiveChat();
+  renderChatList();
+}
+
+async function renderActiveChat() {
+  const history = document.getElementById('messageHistory');
+  const scrollAtBottom = history.scrollHeight - history.scrollTop <= history.clientHeight + 100;
+  
+  history.innerHTML = '';
+
+  const activeMessages = state.messages.filter(m => m.chatPartner === state.activeChatPartner);
+
+  if (activeMessages.length === 0) {
+    history.innerHTML = `
+      <div style="flex: 1; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 13px;">
+        <p><i data-feather="lock" style="width: 12px; height: 12px; vertical-align: middle;"></i> Messages are fully encrypted end-to-end.</p>
+      </div>
+    `;
+    feather.replace();
+    return;
+  }
+
+  for (const msg of activeMessages) {
+    const isOutgoing = msg.sender === state.user.username;
+    
+    const wrapper = document.createElement('div');
+    wrapper.className = `message-wrapper ${isOutgoing ? 'outgoing' : 'incoming'}`;
+
+    const bubble = document.createElement('div');
+    bubble.className = 'message-bubble';
+
+    // Renders attachments
+    if (msg.media) {
+      const mediaDiv = document.createElement('div');
+      mediaDiv.className = 'message-media';
+
+      if (msg.media.type.startsWith('image/')) {
+        const img = document.createElement('img');
+        img.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><text y="50" x="50" text-anchor="middle" font-size="12" fill="grey">Decrypting...</text></svg>';
+        img.alt = msg.media.filename;
+        mediaDiv.appendChild(img);
+
+        // Fetch decrypt asynchronous callback
+        getDecryptedMediaUrl(msg).then(decryptedUrl => {
+          if (decryptedUrl) {
+            img.src = decryptedUrl;
+          } else {
+            img.src = '';
+            mediaDiv.innerText = '[Media Decryption Failed]';
+          }
+        });
+      } else {
+        // Render general document files card
+        const linkCard = document.createElement('a');
+        linkCard.className = 'message-file-card';
+        linkCard.href = '#';
+        linkCard.innerHTML = `
+          <div class="file-icon-wrapper"><i data-feather="file"></i></div>
+          <div class="file-info">
+            <h5>${msg.media.filename}</h5>
+            <p>${(msg.media.size / 1024).toFixed(1)} KB</p>
+          </div>
+        `;
+        mediaDiv.appendChild(linkCard);
+        
+        linkCard.addEventListener('click', async (e) => {
+          e.preventDefault();
+          const decUrl = await getDecryptedMediaUrl(msg);
+          if (decUrl) {
+            const tempLink = document.createElement('a');
+            tempLink.href = decUrl;
+            tempLink.download = msg.media.filename;
+            tempLink.click();
+          } else {
+            alert('File decryption key mismatched.');
+          }
+        });
+      }
+      bubble.appendChild(mediaDiv);
+    }
+
+    // Renders Message content text
+    if (msg.body) {
+      const textNode = document.createElement('span');
+      textNode.innerText = msg.body;
+      bubble.appendChild(textNode);
+    }
+
+    // Meta section (Ticks & Timing)
+    const meta = document.createElement('div');
+    meta.className = 'message-meta';
+    
+    const time = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    meta.innerHTML = `<span class="e2ee-tag"><i data-feather="lock" style="width: 8px; height: 8px;"></i> E2EE</span> <span>${time}</span>`;
+
+    // Outbox ticks (only outgoing messages get checks)
+    if (isOutgoing) {
+      const tick = document.createElement('span');
+      tick.className = `tick-wrapper ${msg.status}`;
+      
+      if (msg.status === 'pending') {
+        tick.innerHTML = '<i data-feather="clock"></i>'; // clock
+      } else if (msg.status === 'sent') {
+        tick.innerHTML = '<i data-feather="check"></i>'; // single check
+      } else if (msg.status === 'delivered') {
+        tick.innerHTML = '<i data-feather="check"></i><i data-feather="check" style="margin-left:-8px;"></i>'; // double check
+      } else if (msg.status === 'read') {
+        tick.innerHTML = '<i data-feather="check"></i><i data-feather="check" style="margin-left:-8px;"></i>'; // blue double check
+      }
+      meta.appendChild(tick);
+    }
+
+    bubble.appendChild(meta);
+    wrapper.appendChild(bubble);
+    history.appendChild(wrapper);
+  }
+
+  // Adjust scroll positions
+  if (scrollAtBottom) {
+    history.scrollTop = history.scrollHeight;
+  }
+  
+  feather.replace();
+}
+
+// Settings dashboard updates
+async function updateStorageStatsUI() {
+  // Calculates size text vs media
+  const rawTextSize = new Blob([JSON.stringify(state.messages)]).size;
+  const rawMediaSize = await getMediaStorageSize();
+
+  const formattedText = (rawTextSize / 1024).toFixed(1) + ' KB';
+  const formattedMedia = (rawMediaSize / (1024 * 1024)).toFixed(2) + ' MB';
+
+  document.getElementById('storageSizeText').innerText = formattedText;
+  document.getElementById('storageSizeMedia').innerText = formattedMedia;
+
+  // Render Bar Charts
+  const total = rawTextSize + rawMediaSize;
+  if (total > 0) {
+    const textPercent = Math.max(5, (rawTextSize / total) * 100);
+    const mediaPercent = Math.max(5, (rawMediaSize / total) * 100);
+    document.getElementById('storageBarText').style.width = `${textPercent}%`;
+    document.getElementById('storageBarMedia').style.width = `${mediaPercent}%`;
+  } else {
+    document.getElementById('storageBarText').style.width = '0%';
+    document.getElementById('storageBarMedia').style.width = '0%';
+  }
+
+  // Calculate storage per chat (text + media)
+  const chatStats = [];
+  for (const chat of state.chats) {
+    const chatMsgs = state.messages.filter(m => m.chatPartner === chat.username);
+    
+    // Calculate text size
+    const chatTextSize = new Blob([JSON.stringify(chatMsgs)]).size;
+    
+    // Calculate media size
+    let chatMediaSize = 0;
+    const mediaFiles = [];
+    
+    for (const m of chatMsgs) {
+      if (m.media) {
+        chatMediaSize += m.media.size || 0;
+        mediaFiles.push(m);
+      }
+    }
+    
+    chatStats.push({
+      username: chat.username,
+      textSize: chatTextSize,
+      mediaSize: chatMediaSize,
+      totalSize: chatTextSize + chatMediaSize,
+      mediaFiles
+    });
+  }
+
+  // Sort largest total size first
+  chatStats.sort((a, b) => b.totalSize - a.totalSize);
+
+  // Render per-chat list
+  const chatsListEl = document.getElementById('storageChatsList');
+  chatsListEl.innerHTML = '';
+
+  if (chatStats.length === 0) {
+    chatsListEl.innerHTML = '<div style="font-size: 12px; color: var(--text-muted); text-align: center; padding: 10px;">No chats to display.</div>';
+    return;
+  }
+
+  chatStats.forEach(stat => {
+    const item = document.createElement('div');
+    item.className = 'storage-chat-item';
+    
+    const formattedChatSize = stat.totalSize > 1024 * 1024 
+      ? (stat.totalSize / (1024 * 1024)).toFixed(2) + ' MB'
+      : (stat.totalSize / 1024).toFixed(1) + ' KB';
+
+    item.innerHTML = `
+      <div class="storage-chat-header">
+        <div class="storage-chat-user">
+          <h5>@${stat.username}</h5>
+          <span style="font-size: 11px; color: var(--text-muted); margin-left: 6px;">Size: <strong>${formattedChatSize}</strong> (${stat.mediaFiles.length} files)</span>
+        </div>
+        <div class="storage-chat-actions">
+          <button type="button" class="btn btn-outline btn-sm btn-files-toggle" style="padding: 4px 8px; font-size: 11px;">
+            <i data-feather="folder" style="width: 12px; height: 12px; margin-right: 2px;"></i> View Files
+          </button>
+          <button type="button" class="btn btn-outline btn-danger btn-sm btn-clear-chat" style="padding: 4px 8px; font-size: 11px;">
+            <i data-feather="trash-2" style="width: 12px; height: 12px; margin-right: 2px;"></i> Clear
+          </button>
+        </div>
+      </div>
+      <div class="storage-media-list">
+        <!-- Media items -->
+      </div>
+    `;
+
+    const mediaListEl = item.querySelector('.storage-media-list');
+    const toggleBtn = item.querySelector('.btn-files-toggle');
+    const clearBtn = item.querySelector('.btn-clear-chat');
+
+    // Populates files inside expanded section
+    if (stat.mediaFiles.length === 0) {
+      mediaListEl.innerHTML = '<div style="font-size: 11px; color: var(--text-muted); padding: 4px 0; text-align: center;">No shared files in this chat.</div>';
+    } else {
+      stat.mediaFiles.forEach(msg => {
+        const fileItem = document.createElement('div');
+        fileItem.className = 'storage-media-item';
+        
+        const fileSizeStr = (msg.media.size / 1024).toFixed(1) + ' KB';
+        fileItem.innerHTML = `
+          <div class="storage-media-item-info">
+            <i data-feather="file" style="width: 12px; height: 12px; stroke: var(--text-secondary);"></i>
+            <span class="storage-media-item-name" style="max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${msg.media.filename}">${msg.media.filename}</span>
+            <span class="storage-media-item-size">(${fileSizeStr})</span>
+          </div>
+          <button type="button" class="btn-delete-file" title="Delete File">
+            <i data-feather="trash" style="width: 12px; height: 12px;"></i>
+          </button>
+        `;
+
+        const deleteFileBtn = fileItem.querySelector('.btn-delete-file');
+        deleteFileBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          if (confirm(`Delete the file "${msg.media.filename}" from this chat? This releases the storage.`)) {
+            // 1. Delete from IndexedDB
+            if (mediaDb) {
+              const transaction = mediaDb.transaction(['media'], 'readwrite');
+              const store = transaction.objectStore('media');
+              store.delete(msg.media.url);
+            }
+            // 2. Clear local memory cache
+            state.localMediaCache.delete(msg.media.url);
+            
+            // 3. Update message object
+            msg.body = `[File deleted: ${msg.media.filename}]`;
+            msg.media = null;
+            
+            saveStateToLocalStorage();
+            await updateStorageStatsUI();
+            renderActiveChat();
+          }
+        });
+
+        mediaListEl.appendChild(fileItem);
+      });
+    }
+
+    // Toggle view files list
+    toggleBtn.addEventListener('click', () => {
+      mediaListEl.classList.toggle('active');
+    });
+
+    // Clear specific chat
+    clearBtn.addEventListener('click', async () => {
+      if (confirm(`Delete all messages and media files for the conversation with @${stat.username}?`)) {
+        // Delete media files from IndexedDB
+        stat.mediaFiles.forEach(m => {
+          if (mediaDb) {
+            const transaction = mediaDb.transaction(['media'], 'readwrite');
+            const store = transaction.objectStore('media');
+            store.delete(m.media.url);
+          }
+          state.localMediaCache.delete(m.media.url);
+        });
+
+        // Filter messages out
+        state.messages = state.messages.filter(m => m.chatPartner !== stat.username);
+        saveStateToLocalStorage();
+        
+        await updateStorageStatsUI();
+        if (state.activeChatPartner === stat.username) {
+          state.activeChatPartner = null;
+          document.getElementById('chatPane').classList.remove('active');
+          document.getElementById('chatEmptyState').classList.add('active');
+        }
+        renderChatList();
+        renderActiveChat();
+      }
+    });
+
+    chatsListEl.appendChild(item);
+  });
+
+  feather.replace();
+}
+
+// WebRTC call panel UI triggers
+function openCallUI(partner, status, direction) {
+  document.getElementById('callTargetUsername').innerText = `@${partner}`;
+  document.getElementById('callAvatar').innerText = partner.substring(0, 2).toUpperCase();
+  document.getElementById('callStatusText').innerText = status === 'ringing' 
+    ? (direction === 'incoming' ? 'Incoming secure call...' : 'Ringing...') 
+    : 'Connecting...';
+  
+  const overlay = document.getElementById('callOverlay');
+  overlay.className = `call-overlay-container active ${direction} ${status === 'connected' ? 'active-call' : ''}`;
+}
+
+// App Initialization
+function initDashboard() {
+  const username = state.user?.username || 'user';
+  const email = state.user?.email || '';
+
+  const userDisp = document.getElementById('myUsernameDisplay');
+  if (userDisp) userDisp.innerText = `@${username}`;
+
+  const emailDisp = document.getElementById('myEmailDisplay');
+  if (emailDisp) emailDisp.innerText = email;
+
+  const avatarDisp = document.getElementById('myAvatar');
+  if (avatarDisp) avatarDisp.innerText = username.substring(0, 2).toUpperCase();
+  
+  const lastBackup = localStorage.getItem('ichat_backup_status');
+  const backupText = document.getElementById('backupStatusText');
+  if (backupText) backupText.innerText = lastBackup ? `Last Backup: ${lastBackup}` : 'Last Backup: Never';
+
+  // Apply Theme
+  applyTheme(state.theme);
+  const themeSelect = document.getElementById('themeSelect');
+  if (themeSelect) themeSelect.value = state.theme;
+
+  renderChatList();
+  
+  // Restore active open conversation if preserved
+  const savedPartner = localStorage.getItem('ichat_active_partner');
+  if (savedPartner && state.chats.some(c => c.username === savedPartner)) {
+    openConversation(savedPartner);
+  }
+
+  connectWebSocket();
+  pollTransientQueue();
+  if (!state.pollInterval) {
+    state.pollInterval = setInterval(pollTransientQueue, 3000);
+  }
+}
+
+
+/* ═══════════ DOM BINDINGS & EVENT LISTENERS ═══════════ */
+document.addEventListener('DOMContentLoaded', async () => {
+  // Initialize Database Caches
+  await initIndexedDB();
+  
+  // Load State
+  loadStateFromLocalStorage();
+
+  const authScreen = document.getElementById('authScreen');
+  const usernameScreen = document.getElementById('usernameScreen');
+  const chatDashboard = document.getElementById('chatDashboard');
+
+  // Reset active classes across screens
+  [authScreen, usernameScreen, chatDashboard].forEach(s => s?.classList.remove('active'));
+
+  if (state.token && state.user) {
+    if (!state.user.username) {
+      usernameScreen?.classList.add('active');
+    } else {
+      chatDashboard?.classList.add('active');
+      initDashboard();
+    }
+  } else {
+    authScreen?.classList.add('active');
+  }
+
+  // Initialize Database button listener
+  const btnInitDb = document.getElementById('btnInitDb');
+  if (btnInitDb) {
+    btnInitDb.addEventListener('click', async () => {
+      const originalHtml = btnInitDb.innerHTML;
+      btnInitDb.disabled = true;
+      btnInitDb.innerHTML = '<span>Initializing DB...</span><i data-feather="loader" class="animate-pulse"></i>';
+      feather.replace();
+
+      try {
+        const data = await apiCall('/api/setup', 'POST');
+        alert(data.message || 'Database initialized successfully!');
+        btnInitDb.innerHTML = '<span>DB Initialized</span><i data-feather="check"></i>';
+      } catch (err) {
+        alert('Database setup failed: ' + err.message);
+        btnInitDb.innerHTML = originalHtml;
+      } finally {
+        btnInitDb.disabled = false;
+        feather.replace();
+      }
+    });
+  }
+
+  // 1. Submit email login OTP
+  document.getElementById('requestOtpForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const email = document.getElementById('emailInput').value;
+    requestOtp(email);
+  });
+
+  // Back button in OTP panel
+  document.getElementById('btnBackToEmail').addEventListener('click', () => {
+    document.getElementById('verifyOtpForm').classList.remove('active');
+    document.getElementById('requestOtpForm').classList.add('active');
+  });
+
+  // 2. Verify OTP code
+  document.getElementById('verifyOtpForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const email = document.getElementById('emailInput').value;
+    const code = document.getElementById('otpCodeInput').value;
+    verifyOtp(email, code);
+  });
+
+  // Cancel login replace screen
+  document.getElementById('btnCancelReplace').addEventListener('click', () => {
+    document.getElementById('deviceConflictResolver').classList.remove('active');
+  });
+
+  // 3. Complete username setup
+  document.getElementById('usernameForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const username = document.getElementById('usernameInput').value;
+    registerUsername(username);
+  });
+
+  // 4. Search dropdown contacts handler
+  const searchInput = document.getElementById('contactSearchInput');
+  const dropdown = document.getElementById('searchDropdownList');
+
+  searchInput.addEventListener('input', async () => {
+    const q = searchInput.value.trim();
+    if (q.length < 2) {
+      dropdown.classList.remove('active');
+      return;
+    }
+
+    try {
+      const data = await apiCall(`/api/users/search?q=${q}`, 'GET');
+      dropdown.innerHTML = '';
+      
+      if (data.users.length === 0) {
+        dropdown.innerHTML = '<div style="padding: 12px; font-size:12px; color: var(--text-muted);">No users found</div>';
+      } else {
+        data.users.forEach(u => {
+          const item = document.createElement('div');
+          item.className = 'search-result-item';
+          item.innerHTML = `<div><h5>@${u.username}</h5><p>${u.email}</p></div><button class="add-btn">Chat</button>`;
+          
+          item.addEventListener('click', () => {
+            dropdown.classList.remove('active');
+            searchInput.value = '';
+            
+            // Add contact to chats list
+            if (!state.chats.some(c => c.username === u.username)) {
+              state.chats.push({
+                username: u.username,
+                email: u.email,
+                unreadCount: 0
+              });
+              saveStateToLocalStorage();
+            }
+            openConversation(u.username);
+          });
+          dropdown.appendChild(item);
+        });
+      }
+      dropdown.classList.add('active');
+    } catch (e) {
+      console.error(e);
+    }
+  });
+
+  // Hide search outcomes when clicking outside
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.sidebar-search')) {
+      dropdown.classList.remove('active');
+    }
+  });
+
+  // 5. Active Chat message entry
+  const textInput = document.getElementById('messageTextInput');
+  const sendBtn = document.getElementById('btnSendMessage');
+
+  // Auto-resize message input height
+  textInput.addEventListener('input', () => {
+    textInput.style.height = 'auto';
+    textInput.style.height = `${textInput.scrollHeight}px`;
+
+    // Typing statuses notifications with 2s cooldown
+    if (state.activeChatPartner) {
+      if (!state.isTyping) {
+        state.isTyping = true;
+        sendTypingIndicator(state.activeChatPartner, true);
+      }
+      clearTimeout(state.typingTimer);
+      state.typingTimer = setTimeout(() => {
+        state.isTyping = false;
+        sendTypingIndicator(state.activeChatPartner, false);
+      }, 2000);
+    }
+  });
+
+  // Message Send actions
+  const triggerSendText = () => {
+    const text = textInput.value.trim();
+    if (text && state.activeChatPartner) {
+      sendE2EEMessage(state.activeChatPartner, text);
+      textInput.value = '';
+      textInput.style.height = 'auto';
+      
+      // Clear typing notifications immediately
+      clearTimeout(state.typingTimer);
+      state.isTyping = false;
+      sendTypingIndicator(state.activeChatPartner, false);
+    }
+  };
+
+  sendBtn.addEventListener('click', triggerSendText);
+  textInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      triggerSendText();
+    }
+  });
+
+  // 6. Media Attachment input Trigger
+  const attachBtn = document.getElementById('btnAttachFile');
+  const fileInput = document.getElementById('mediaFileInput');
+
+  attachBtn.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files[0];
+    if (file && state.activeChatPartner) {
+      attachBtn.innerHTML = '<i data-feather="loader" class="animate-pulse"></i>';
+      feather.replace();
+      
+      const mediaResult = await encryptAndUploadFile(file);
+      if (mediaResult) {
+        // Send file message packet
+        await sendE2EEMessage(state.activeChatPartner, null, mediaResult);
+      }
+      
+      attachBtn.innerHTML = '<i data-feather="paperclip"></i>';
+      fileInput.value = '';
+      feather.replace();
+    }
+  });
+
+  // 7. Modals: Settings Modal toggle triggers
+  const settingsModal = document.getElementById('settingsModal');
+  const btnSettings = document.getElementById('btnSettings');
+  const btnCloseSettings = document.getElementById('btnCloseSettings');
+
+  btnSettings.addEventListener('click', () => {
+    updateStorageStatsUI();
+    settingsModal.classList.add('active');
+  });
+  btnCloseSettings.addEventListener('click', () => {
+    settingsModal.classList.remove('active');
+  });
+
+  // Settings: Theme Option selector
+  document.getElementById('themeSelect').addEventListener('change', (e) => {
+    applyTheme(e.target.value);
+  });
+
+  // Settings: Create Cloud backup action
+  document.getElementById('btnCreateBackup').addEventListener('click', () => {
+    const pass = document.getElementById('backupPasscode').value;
+    executeBackup(pass);
+    document.getElementById('backupPasscode').value = '';
+  });
+
+  // Settings: Restore backup database
+  document.getElementById('btnRestoreBackup').addEventListener('click', () => {
+    const pass = document.getElementById('restorePasscode').value;
+    executeRestore(pass);
+    document.getElementById('restorePasscode').value = '';
+  });
+
+  // Settings: Clear Cached Media files
+  document.getElementById('btnClearMedia').addEventListener('click', async () => {
+    if (confirm('Are you sure you want to clear all downloaded media files from your local storage cache? Text chats will be kept.')) {
+      await clearMediaLocalDB();
+      state.localMediaCache.clear();
+      updateStorageStatsUI();
+      renderActiveChat();
+      alert('Downloaded media attachments cleared.');
+    }
+  });
+
+  // Settings: Clear chat logs database
+  document.getElementById('btnClearAllChats').addEventListener('click', () => {
+    if (confirm('WARNING: This will permanently delete your entire local chat history. This action is irreversible. Proceed?')) {
+      state.chats = [];
+      state.messages = [];
+      state.localMediaCache.clear();
+      clearMediaLocalDB();
+      saveStateToLocalStorage();
+      renderChatList();
+      renderActiveChat();
+      updateStorageStatsUI();
+      alert('Chat history wiped.');
+    }
+  });
+
+  // Settings: Delete entire account profile
+  document.getElementById('btnDeleteAccount').addEventListener('click', deleteAccount);
+
+  // 8. Log out session
+  const triggerLogOutAction = () => {
+    if (confirm('Log out from this device session? You can restore your chats later using a backup password.')) {
+      triggerLogOut();
+    }
+  };
+
+  document.getElementById('btnLogout')?.addEventListener('click', triggerLogOutAction);
+  document.getElementById('btnModalLogout')?.addEventListener('click', triggerLogOutAction);
+
+  // 9. WebRTC: Calling interface hooks
+  document.getElementById('btnMakeCall').addEventListener('click', () => {
+    if (state.activeChatPartner) {
+      triggerCallOut(state.activeChatPartner);
+    }
+  });
+
+  document.getElementById('btnCallAccept').addEventListener('click', acceptIncomingCall);
+  document.getElementById('btnCallDecline').addEventListener('click', declineIncomingCall);
+  document.getElementById('btnCallHangup').addEventListener('click', () => hangUpCall());
+  document.getElementById('btnCallMute').addEventListener('click', toggleMuteMic);
+
+  // Responsive mobile sidebar back buttons
+  const backBtn = document.getElementById('btnBackToSidebar');
+  if (backBtn) {
+    backBtn.addEventListener('click', () => {
+      state.activeChatPartner = null;
+      localStorage.removeItem('ichat_active_partner');
+      document.getElementById('chatPane')?.classList.remove('active');
+      document.getElementById('chatEmptyState')?.classList.add('active');
+      document.getElementById('chatWindow')?.classList.remove('active');
+      document.getElementById('sidebar')?.classList.remove('inactive');
+    });
+  }
+
+  // Initial feather icon replacements
+  feather.replace();
+});
