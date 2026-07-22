@@ -2140,14 +2140,14 @@ async function renderActiveChat() {
       banner.style.display = 'flex';
       const bannerTitle = document.getElementById('requestBannerTitle');
       const bannerSub = document.getElementById('requestBannerSubtitle');
-      if (bannerTitle) bannerTitle.innerText = `Message Request from @${currentChat.username}`;
-      if (bannerSub) bannerSub.innerText = `Do you want to let @${currentChat.username} message you?`;
+      if (bannerTitle) bannerTitle.innerText = `Message Request`;
+      if (bannerSub) bannerSub.innerText = `Allow @${currentChat.username} to message you?`;
     }
     if (noticeBar) noticeBar.style.display = 'none';
     if (inputBar) inputBar.classList.add('disabled');
     if (textInput) {
       textInput.disabled = true;
-      textInput.placeholder = `Accept request from @${currentChat.username} to reply...`;
+      textInput.placeholder = `Accept request to reply...`;
     }
     if (sendBtn) sendBtn.disabled = true;
     if (attachBtn) attachBtn.disabled = true;
@@ -2158,12 +2158,12 @@ async function renderActiveChat() {
       if (noticeBar) {
         noticeBar.style.display = 'flex';
         const noticeText = document.getElementById('requestNoticeText');
-        if (noticeText) noticeText.innerText = `Waiting for @${currentChat.username} to accept your request before sending more messages.`;
+        if (noticeText) noticeText.innerText = `Waiting for @${currentChat.username} to accept your request.`;
       }
       if (inputBar) inputBar.classList.add('disabled');
       if (textInput) {
         textInput.disabled = true;
-        textInput.placeholder = `Waiting for @${currentChat.username} to accept...`;
+        textInput.placeholder = `Waiting for acceptance...`;
       }
       if (sendBtn) sendBtn.disabled = true;
       if (attachBtn) attachBtn.disabled = true;
