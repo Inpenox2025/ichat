@@ -12,6 +12,13 @@ Notifications.setNotificationHandler({
 
 export async function registerForPushNotificationsAsync() {
   try {
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission !== 'granted' && Notification.permission !== 'denied') {
+        try { await Notification.requestPermission(); } catch (e) {}
+      }
+      return true;
+    }
+
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
     
@@ -43,18 +50,42 @@ export async function registerForPushNotificationsAsync() {
 
 export async function presentLocalNotification({ title, body, data = {} }) {
   try {
-    // Trigger subtle vibration pattern
-    Vibration.vibrate([0, 150, 100, 150]);
+    // 1. Mobile (Android / iOS)
+    if (Platform.OS !== 'web') {
+      Vibration.vibrate([0, 150, 100, 150]);
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title,
+          body,
+          sound: true,
+          data,
+        },
+        trigger: null, // Display immediately
+      });
+      return;
+    }
 
-    await Notifications.scheduleNotificationAsync({
-      content: {
-        title,
-        body,
-        sound: true,
-        data,
-      },
-      trigger: null, // Display immediately
-    });
+    // 2. Web Browser Desktop Notifications API
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      if (Notification.permission === 'granted') {
+        new Notification(title, {
+          body,
+          icon: '/favicon.ico',
+          badge: '/favicon.ico',
+          tag: data?.chatPartner || 'ichat-msg'
+        });
+      } else if (Notification.permission !== 'denied') {
+        const perm = await Notification.requestPermission();
+        if (perm === 'granted') {
+          new Notification(title, {
+            body,
+            icon: '/favicon.ico',
+            badge: '/favicon.ico',
+            tag: data?.chatPartner || 'ichat-msg'
+          });
+        }
+      }
+    }
   } catch (err) {
     console.warn('[NOTIFICATIONS PRESENT ERROR]', err);
   }
