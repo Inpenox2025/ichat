@@ -72,12 +72,36 @@ export default function AuthScreen({ onAuthSuccess }) {
 
     setLoading(true);
     try {
+      let id = deviceId;
+      if (!id) {
+        id = await AsyncStorage.getItem('ichat_device_id');
+        if (!id) {
+          id = 'mob-' + Math.random().toString(36).substring(2, 15);
+          await AsyncStorage.setItem('ichat_device_id', id);
+        }
+        setDeviceId(id);
+      }
+
+      let keys = localKeys;
+      if (!keys) {
+        let pub = await AsyncStorage.getItem('ichat_identity_key_public');
+        let priv = await AsyncStorage.getItem('ichat_identity_key_private');
+        if (pub && priv) {
+          keys = { publicKey: pub, privateKey: priv };
+        } else {
+          keys = generateIdentityKeys();
+          await AsyncStorage.setItem('ichat_identity_key_public', keys.publicKey);
+          await AsyncStorage.setItem('ichat_identity_key_private', keys.privateKey);
+        }
+        setLocalKeys(keys);
+      }
+
       const payload = {
         email: email.trim().toLowerCase(),
         code: otp,
-        device_id: deviceId,
+        device_id: id,
         device_name: 'Android Device',
-        public_key: localKeys.publicKey
+        public_key: keys.publicKey
       };
 
       if (replaceDeviceId) {
