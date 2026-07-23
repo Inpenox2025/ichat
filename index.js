@@ -427,7 +427,7 @@ function saveMediaToLocalDB(url, arrayBuffer, mimeType) {
 
 function getMediaFromLocalDB(url) {
   return new Promise((resolve) => {
-    if (!mediaDb) return resolve(null);
+    if (!mediaDb || !url) return resolve(null);
     const transaction = mediaDb.transaction(['media'], 'readonly');
     const store = transaction.objectStore('media');
     const request = store.get(url);
