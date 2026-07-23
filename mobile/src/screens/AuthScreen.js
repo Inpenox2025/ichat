@@ -155,16 +155,6 @@ export default function AuthScreen({ onAuthSuccess }) {
         {/* Step 1: Request OTP */}
         {step === 1 && (
           <View style={styles.form}>
-            <Text style={styles.label}>Server Endpoint IP/Port</Text>
-            <TextInput
-              style={styles.input}
-              value={serverUrl}
-              onChangeText={setServerUrl}
-              placeholder="e.g. http://192.168.1.100:3000"
-              autoCapitalize="none"
-              keyboardType="url"
-            />
-
             <Text style={styles.label}>Email Address</Text>
             <TextInput
               style={styles.input}
