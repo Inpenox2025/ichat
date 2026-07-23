@@ -37,25 +37,32 @@
 /* Light Theme Variables Override */
 .theme-light, 
 #app.theme-light {
-  --bg-primary: hsl(210, 40%, 98%);
-  --bg-secondary: hsl(0, 0%, 100%);
-  --bg-tertiary: hsl(210, 30%, 94%);
-  --bg-card: hsl(0, 0%, 100%);
-  --modal-overlay-bg: rgba(0, 0, 0, 0.45);
-  --text-primary: hsl(224, 25%, 12%);
-  --text-secondary: hsl(224, 15%, 35%);
-  --text-muted: hsl(224, 10%, 55%);
-  --accent: hsl(182, 100%, 33%);
-  --accent-hover: hsl(182, 100%, 26%);
-  --accent-rgb: 0, 168, 181;
-  --border: hsl(210, 20%, 88%);
+  --bg-primary: #f8fafc;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #f1f5f9;
+  --bg-card: #ffffff;
+  --modal-overlay-bg: rgba(15, 23, 42, 0.45);
   
-  --glass-bg: rgba(255, 255, 255, 0.75);
-  --glass-border: rgba(0, 0, 0, 0.06);
-  --card-shadow: 0 15px 35px rgba(0, 0, 0, 0.08);
-  --input-bg: hsl(210, 20%, 95%);
+  --text-primary: #0f172a;       /* Deep rich charcoal - 100% sharp contrast */
+  --text-secondary: #334155;     /* Dark slate gray - clear & crisp descriptions */
+  --text-muted: #64748b;         /* Slate gray - distinct secondary labels & timestamps */
   
-  --accent-glow: 0 0 15px rgba(0, 168, 181, 0.2);
+  --accent: #0284c7;             /* Ocean blue-teal accent */
+  --accent-hover: #0369a1;
+  --accent-rgb: 2, 132, 199;
+  --accent-text: #ffffff;        /* Crisp white text on primary accent elements */
+  
+  --border: #e2e8f0;
+  --glass-bg: rgba(255, 255, 255, 0.85);
+  --glass-border: rgba(0, 0, 0, 0.08);
+  --card-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+  --input-bg: #f8fafc;
+  
+  --color-success: #16a34a;       /* Rich emerald green for Online status */
+  --color-danger: #dc2626;
+  --color-warning: #d97706;
+  
+  --accent-glow: 0 4px 14px rgba(2, 132, 199, 0.25);
 }
 
 /* Explicit Dark Theme Wrapper (if set via select) */
@@ -68,10 +75,11 @@
   --modal-overlay-bg: rgba(12, 16, 26, 0.75);
   --text-primary: hsl(210, 40%, 98%);
   --text-secondary: hsl(215, 20%, 75%);
-  --text-muted: hsl(215, 15%, 50%);
+  --text-muted: hsl(215, 15%, 55%);
   --accent: hsl(180, 100%, 45%);
   --accent-hover: hsl(180, 100%, 38%);
   --accent-rgb: 0, 242, 254;
+  --accent-text: hsl(224, 25%, 12%);
   --border: hsl(224, 20%, 24%);
   
   --glass-bg: rgba(22, 28, 45, 0.65);
@@ -84,23 +92,32 @@
 @media (prefers-color-scheme: light) {
   .theme-system,
   #app.theme-system {
-    --bg-primary: hsl(210, 40%, 98%);
-    --bg-secondary: hsl(0, 0%, 100%);
-    --bg-tertiary: hsl(210, 30%, 94%);
-    --text-primary: hsl(224, 25%, 12%);
-    --text-secondary: hsl(224, 15%, 35%);
-    --text-muted: hsl(224, 10%, 55%);
-    --accent: hsl(182, 100%, 33%);
-    --accent-hover: hsl(182, 100%, 26%);
-    --accent-rgb: 0, 168, 181;
-    --border: hsl(210, 20%, 88%);
+    --bg-primary: #f8fafc;
+    --bg-secondary: #ffffff;
+    --bg-tertiary: #f1f5f9;
+    --bg-card: #ffffff;
+    --modal-overlay-bg: rgba(15, 23, 42, 0.45);
     
-    --glass-bg: rgba(255, 255, 255, 0.75);
-    --glass-border: rgba(0, 0, 0, 0.06);
-    --card-shadow: 0 15px 35px rgba(0, 0, 0, 0.06);
-    --input-bg: hsl(210, 20%, 95%);
+    --text-primary: #0f172a;
+    --text-secondary: #334155;
+    --text-muted: #64748b;
     
-    --accent-glow: 0 0 15px rgba(0, 168, 181, 0.2);
+    --accent: #0284c7;
+    --accent-hover: #0369a1;
+    --accent-rgb: 2, 132, 199;
+    --accent-text: #ffffff;
+    
+    --border: #e2e8f0;
+    --glass-bg: rgba(255, 255, 255, 0.85);
+    --glass-border: rgba(0, 0, 0, 0.08);
+    --card-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+    --input-bg: #f8fafc;
+    
+    --color-success: #16a34a;
+    --color-danger: #dc2626;
+    --color-warning: #d97706;
+    
+    --accent-glow: 0 4px 14px rgba(2, 132, 199, 0.25);
   }
 }
 
@@ -991,12 +1008,29 @@ h1, h2, h3, h4, h5, h6 {
 
 .message-wrapper.outgoing .message-bubble {
   background-color: var(--accent);
-  color: hsl(224, 25%, 12%);
+  color: var(--accent-text);
   border-bottom-right-radius: 4px;
 }
 
+/* Light Theme Outgoing Bubble Override */
+.theme-light .message-wrapper.outgoing .message-bubble,
+#app.theme-light .message-wrapper.outgoing .message-bubble {
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+  color: #ffffff;
+  box-shadow: 0 3px 10px rgba(2, 132, 199, 0.2);
+}
+
+@media (prefers-color-scheme: light) {
+  .theme-system .message-wrapper.outgoing .message-bubble,
+  #app.theme-system .message-wrapper.outgoing .message-bubble {
+    background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+    color: #ffffff;
+    box-shadow: 0 3px 10px rgba(2, 132, 199, 0.2);
+  }
+}
+
 .message-wrapper.incoming .message-bubble {
-  background-color: var(--bg-secondary);
+  background-color: var(--bg-card);
   color: var(--text-primary);
   border: 1px solid var(--border);
   border-bottom-left-radius: 4px;
@@ -1077,8 +1111,10 @@ h1, h2, h3, h4, h5, h6 {
 .message-wrapper.outgoing .message-meta {
   color: var(--text-muted);
 }
+
 .message-wrapper.incoming .message-meta {
-  color: var(--text-muted);
+  color: var(--text-secondary);
+  font-weight: 500;
 }
 
 /* E2EE Tag inside Chat Bubble */
@@ -1087,7 +1123,7 @@ h1, h2, h3, h4, h5, h6 {
   align-items: center;
   font-size: 9px;
   font-weight: 700;
-  opacity: 0.7;
+  opacity: 0.85;
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
@@ -1123,27 +1159,74 @@ h1, h2, h3, h4, h5, h6 {
   filter: drop-shadow(0 0 2px rgba(56, 189, 248, 0.4));
 }
 
-/* High-contrast checkmarks inside Outgoing Accent Message Bubbles */
-.message-wrapper.outgoing .tick-wrapper svg {
-  stroke: rgba(15, 23, 42, 0.55);
+/* Dark-Theme Outgoing Checkmarks */
+.theme-dark .message-wrapper.outgoing .message-meta,
+#app.theme-dark .message-wrapper.outgoing .message-meta {
+  color: rgba(12, 16, 26, 0.75);
 }
-
-.message-wrapper.outgoing .tick-wrapper.sent svg {
-  stroke: rgba(15, 23, 42, 0.7);
+.theme-dark .message-wrapper.outgoing .tick-wrapper svg,
+#app.theme-dark .message-wrapper.outgoing .tick-wrapper svg {
+  stroke: rgba(12, 16, 26, 0.55);
 }
-
-.message-wrapper.outgoing .tick-wrapper.delivered svg {
-  stroke: rgba(15, 23, 42, 0.85);
+.theme-dark .message-wrapper.outgoing .tick-wrapper.sent svg,
+#app.theme-dark .message-wrapper.outgoing .tick-wrapper.sent svg {
+  stroke: rgba(12, 16, 26, 0.7);
 }
-
-.message-wrapper.outgoing .tick-wrapper.read svg {
-  stroke: #1D4ED8 !important; /* Deep Cobalt Blue Read Status on Teal Accent */
+.theme-dark .message-wrapper.outgoing .tick-wrapper.delivered svg,
+#app.theme-dark .message-wrapper.outgoing .tick-wrapper.delivered svg {
+  stroke: rgba(12, 16, 26, 0.85);
+}
+.theme-dark .message-wrapper.outgoing .tick-wrapper.read svg,
+#app.theme-dark .message-wrapper.outgoing .tick-wrapper.read svg {
+  stroke: #1D4ED8 !important;
   filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.7));
 }
 
-/* Light Mode Overrides for Outgoing Checkmarks */
-.theme-light .message-wrapper.outgoing .tick-wrapper.read svg {
-  stroke: #0284C7 !important;
+/* Light-Theme Outgoing Checkmarks & Meta Overrides */
+.theme-light .message-wrapper.outgoing .message-meta,
+#app.theme-light .message-wrapper.outgoing .message-meta {
+  color: rgba(255, 255, 255, 0.9);
+}
+.theme-light .message-wrapper.outgoing .tick-wrapper svg,
+#app.theme-light .message-wrapper.outgoing .tick-wrapper svg {
+  stroke: rgba(255, 255, 255, 0.75);
+}
+.theme-light .message-wrapper.outgoing .tick-wrapper.sent svg,
+#app.theme-light .message-wrapper.outgoing .tick-wrapper.sent svg {
+  stroke: rgba(255, 255, 255, 0.88);
+}
+.theme-light .message-wrapper.outgoing .tick-wrapper.delivered svg,
+#app.theme-light .message-wrapper.outgoing .tick-wrapper.delivered svg {
+  stroke: #ffffff;
+}
+.theme-light .message-wrapper.outgoing .tick-wrapper.read svg,
+#app.theme-light .message-wrapper.outgoing .tick-wrapper.read svg {
+  stroke: #7dd3fc !important;
+  filter: drop-shadow(0 0 2px rgba(125, 211, 252, 0.6));
+}
+
+@media (prefers-color-scheme: light) {
+  .theme-system .message-wrapper.outgoing .message-meta,
+  #app.theme-system .message-wrapper.outgoing .message-meta {
+    color: rgba(255, 255, 255, 0.9);
+  }
+  .theme-system .message-wrapper.outgoing .tick-wrapper svg,
+  #app.theme-system .message-wrapper.outgoing .tick-wrapper svg {
+    stroke: rgba(255, 255, 255, 0.75);
+  }
+  .theme-system .message-wrapper.outgoing .tick-wrapper.sent svg,
+  #app.theme-system .message-wrapper.outgoing .tick-wrapper.sent svg {
+    stroke: rgba(255, 255, 255, 0.88);
+  }
+  .theme-system .message-wrapper.outgoing .tick-wrapper.delivered svg,
+  #app.theme-system .message-wrapper.outgoing .tick-wrapper.delivered svg {
+    stroke: #ffffff;
+  }
+  .theme-system .message-wrapper.outgoing .tick-wrapper.read svg,
+  #app.theme-system .message-wrapper.outgoing .tick-wrapper.read svg {
+    stroke: #7dd3fc !important;
+    filter: drop-shadow(0 0 2px rgba(125, 211, 252, 0.6));
+  }
 }
 
 /* Input Bar Layout */
