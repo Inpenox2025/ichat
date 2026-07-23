@@ -215,86 +215,11 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
   }
 
   async function handleBackup() {
-    if (!backupPass || backupPass.length < 4) {
-      Alert.alert('Error', 'Please enter a secure password (at least 4 characters)');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const pub = await AsyncStorage.getItem('ichat_identity_key_public');
-      const priv = await AsyncStorage.getItem('ichat_identity_key_private');
-
-      const payloadObject = {
-        chats,
-        messages,
-        keys: { publicKey: pub, privateKey: priv }
-      };
-
-      const salt = user.email;
-      const keyBytes = pbkdf2Sync(backupPass, salt, 2000, 32);
-
-      const encrypted = encryptSymmetric(JSON.stringify(payloadObject), keyBytes);
-      const backupBlobString = JSON.stringify(encrypted);
-
-      const res = await fetch(`${serverUrl}/api/backup/upload`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ backup_data: backupBlobString })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to upload backup');
-
-      const timeStr = new Date().toLocaleString();
-      await AsyncStorage.setItem('ichat_backup_status', timeStr);
-      setBackupStatus(timeStr);
-      setBackupPass('');
-      Alert.alert('Success', 'Zero-knowledge backup successfully uploaded.');
-    } catch (err) {
-      Alert.alert('Backup failed', err.message);
-    } finally {
-      setLoading(false);
-    }
+    await handleExportLocalBackup();
   }
 
   async function handleRestore() {
-    if (!restorePass) {
-      Alert.alert('Error', 'Please enter your backup password');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const res = await fetch(`${serverUrl}/api/backup/download`, {
-        method: 'GET',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to download backup');
-
-      const encryptedBlob = JSON.parse(data.backup_data);
-      const salt = user.email;
-      const keyBytes = pbkdf2Sync(restorePass, salt, 2000, 32);
-
-      const decryptedStr = decryptSymmetric(encryptedBlob.ciphertext, encryptedBlob.nonce, keyBytes);
-      const restored = JSON.parse(decryptedStr);
-
-      await AsyncStorage.setItem('ichat_identity_key_public', restored.keys.publicKey);
-      await AsyncStorage.setItem('ichat_identity_key_private', restored.keys.privateKey);
-      await AsyncStorage.setItem('ichat_chats', JSON.stringify(restored.chats));
-      await AsyncStorage.setItem('ichat_messages', JSON.stringify(restored.messages));
-
-      onRestoreCompleted(restored.chats, restored.messages);
-      setRestorePass('');
-      Alert.alert('Success', 'Chat history and keys successfully restored.');
-    } catch (err) {
-      Alert.alert('Restore failed', 'Decryption password key mismatched.');
-    } finally {
-      setLoading(false);
-    }
+    await handleImportLocalBackup();
   }
 
   async function handleExportLocalBackup() {
