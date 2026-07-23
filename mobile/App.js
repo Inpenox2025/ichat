@@ -51,6 +51,8 @@ export default function App() {
 
   const navigationRef = useRef(null);
 
+  const [initialRoute, setInitialRoute] = useState('MainHome');
+
   // Initialize App and Load Local Data
   useEffect(() => {
     async function loadInitialData() {
@@ -60,6 +62,11 @@ export default function App() {
         const savedServer = await AsyncStorage.getItem('ichat_server_url');
         const savedTheme = await AsyncStorage.getItem('ichat_theme') || 'system';
         const savedTab = await AsyncStorage.getItem('ichat_active_tab') || 'home';
+        const savedRoute = await AsyncStorage.getItem('ichat_last_route');
+
+        if (savedRoute && (savedRoute === 'MainHome' || savedRoute === 'Settings')) {
+          setInitialRoute(savedRoute);
+        }
 
         if (savedToken && savedUser && savedServer) {
           setToken(savedToken);
@@ -744,11 +751,22 @@ export default function App() {
     <ThemeProvider>
       <SafeAreaProvider>
         <StatusBar style="auto" />
-        <NavigationContainer ref={navigationRef}>
+        <NavigationContainer 
+          ref={navigationRef}
+          onStateChange={() => {
+            try {
+              const currentName = navigationRef.current?.getCurrentRoute()?.name;
+              if (currentName && (currentName === 'MainHome' || currentName === 'Settings')) {
+                AsyncStorage.setItem('ichat_last_route', currentName);
+              }
+            } catch (e) {}
+          }}
+        >
           {!token ? (
             <AuthScreen onAuthSuccess={handleAuthSuccess} />
           ) : (
             <Stack.Navigator
+              initialRouteName={initialRoute}
               screenOptions={{
                 headerShown: false,
                 contentStyle: { backgroundColor: 'transparent' }
