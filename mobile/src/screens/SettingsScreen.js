@@ -141,6 +141,64 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
     ]);
   }
 
+  async function handleCloudBackup() {
+    if (!backupPass || backupPass.length < 4) {
+      Alert.alert('Passcode Required', 'Please set a backup passcode (at least 4 characters).');
+      return;
+    }
+    setLoading(true);
+    try {
+      const pub = await AsyncStorage.getItem('ichat_identity_key_public');
+      const priv = await AsyncStorage.getItem('ichat_identity_key_private');
+      const payload = { chats, messages, keys: { publicKey: pub, privateKey: priv } };
+      const keyBytes = pbkdf2Sync(backupPass, user.email, 2000, 32);
+      const encrypted = encryptSymmetric(JSON.stringify(payload), keyBytes);
+
+      const res = await fetch(`${serverUrl}/api/backup`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ backup_data: JSON.stringify(encrypted) })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Cloud backup failed');
+
+      const statusStr = new Date().toLocaleString();
+      await AsyncStorage.setItem('ichat_backup_status', statusStr);
+      setBackupStatus(statusStr);
+      Alert.alert('Cloud Backup Complete', 'Encrypted chat history and E2EE keys backed up securely to your account.');
+    } catch (err) { Alert.alert('Backup failed', err.message); }
+    finally { setLoading(false); }
+  }
+
+  async function handleCloudRestore() {
+    if (!restorePass) { Alert.alert('Passcode Required', 'Please enter your backup passcode.'); return; }
+    setLoading(true);
+    try {
+      const res = await fetch(`${serverUrl}/api/backup`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'No backup found for this account.');
+
+      const blob = JSON.parse(data.backup_data);
+      const keyBytes = pbkdf2Sync(restorePass, user.email, 2000, 32);
+      const decrypted = JSON.parse(decryptSymmetric(blob.ciphertext, blob.nonce, keyBytes));
+
+      await AsyncStorage.setItem('ichat_identity_key_public', decrypted.keys.publicKey);
+      await AsyncStorage.setItem('ichat_identity_key_private', decrypted.keys.privateKey);
+      await AsyncStorage.setItem('ichat_chats', JSON.stringify(decrypted.chats));
+      await AsyncStorage.setItem('ichat_messages', JSON.stringify(decrypted.messages));
+
+      onRestoreCompleted(decrypted.chats, decrypted.messages);
+      setRestorePass('');
+      Alert.alert('Restore Complete', 'Encrypted chat history and keys restored successfully!');
+    } catch (err) { Alert.alert('Restore failed', 'Wrong passcode or corrupt backup data.'); }
+    finally { setLoading(false); }
+  }
+
   async function handleExportLocalBackup() {
     if (Platform.OS === 'web') {
       Alert.alert('Export on Web', 'On web, use the desktop app backup feature instead.');
@@ -383,25 +441,42 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
             </View>
           </View>
 
-          {/* Export */}
+          {/* Cloud Account Backup */}
           <Card>
-            <Text style={{ color: C.text, fontWeight: '600', fontSize: 14, marginBottom: 10 }}>Export Encrypted Backup</Text>
-            <TextInput style={{ backgroundColor: C.input, borderWidth: 1, borderColor: C.inputBorder, borderRadius: 8, color: C.text, padding: 10, fontSize: 13, marginBottom: 10 }} secureTextEntry value={backupPass} onChangeText={setBackupPass} placeholder="Set backup passcode" placeholderTextColor={C.textFaint} />
-            <TouchableOpacity style={{ backgroundColor: C.accent, borderRadius: 8, padding: 12, alignItems: 'center' }} onPress={handleExportLocalBackup} disabled={loading}>
-              <Text style={{ color: C.isDark ? '#0c101a' : '#ffffff', fontWeight: '700', fontSize: 13 }}>📤 Share Encrypted File</Text>
+            <Text style={{ color: C.text, fontWeight: '600', fontSize: 14, marginBottom: 4 }}>☁️ Encrypted Cloud Backup</Text>
+            <Text style={{ color: C.textMuted, fontSize: 11, marginBottom: 10 }}>Securely back up your chat logs and E2EE keys to your account in the cloud.</Text>
+            <TextInput style={{ backgroundColor: C.input, borderWidth: 1, borderColor: C.inputBorder, borderRadius: 8, color: C.text, padding: 10, fontSize: 13, marginBottom: 10 }} secureTextEntry value={backupPass} onChangeText={setBackupPass} placeholder="Set backup passcode (min 4 chars)" placeholderTextColor={C.textFaint} />
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <TouchableOpacity style={{ flex: 1, backgroundColor: C.accent, borderRadius: 8, padding: 12, alignItems: 'center' }} onPress={handleCloudBackup} disabled={loading}>
+                {loading ? <ActivityIndicator color="#0c101a" /> : <Text style={{ color: C.isDark ? '#0c101a' : '#ffffff', fontWeight: '700', fontSize: 13 }}>☁️ Backup to Cloud</Text>}
+              </TouchableOpacity>
+            </View>
+          </Card>
+
+          {/* Cloud Account Restore */}
+          <Card>
+            <Text style={{ color: C.text, fontWeight: '600', fontSize: 14, marginBottom: 4 }}>☁️ Restore from Cloud</Text>
+            <Text style={{ color: C.textMuted, fontSize: 11, marginBottom: 10 }}>Restore encrypted chat history and security keys from your cloud account.</Text>
+            <TextInput style={{ backgroundColor: C.input, borderWidth: 1, borderColor: C.inputBorder, borderRadius: 8, color: C.text, padding: 10, fontSize: 13, marginBottom: 10 }} secureTextEntry value={restorePass} onChangeText={setRestorePass} placeholder="Enter your backup passcode" placeholderTextColor={C.textFaint} />
+            <TouchableOpacity style={{ backgroundColor: C.cardAlt, borderWidth: 1, borderColor: C.borderStrong, borderRadius: 8, padding: 12, alignItems: 'center' }} onPress={handleCloudRestore} disabled={loading}>
+              {loading ? <ActivityIndicator color={C.text} /> : <Text style={{ color: C.text, fontWeight: '700', fontSize: 13 }}>☁️ Restore from Cloud</Text>}
             </TouchableOpacity>
           </Card>
 
-          {/* Import */}
+          {/* Local File Export / Import */}
           <Card>
-            <Text style={{ color: C.text, fontWeight: '600', fontSize: 14, marginBottom: 10 }}>Import Backup File</Text>
-            <TextInput style={{ backgroundColor: C.input, borderWidth: 1, borderColor: C.inputBorder, borderRadius: 8, color: C.text, padding: 10, fontSize: 13, marginBottom: 10 }} secureTextEntry value={restorePass} onChangeText={setRestorePass} placeholder="Enter backup passcode" placeholderTextColor={C.textFaint} />
-            <TouchableOpacity style={{ backgroundColor: C.cardAlt, borderWidth: 1, borderColor: C.borderStrong, borderRadius: 8, padding: 12, alignItems: 'center' }} onPress={handleImportLocalBackup} disabled={loading}>
-              <Text style={{ color: C.text, fontWeight: '700', fontSize: 13 }}>📥 Import from File</Text>
-            </TouchableOpacity>
+            <Text style={{ color: C.text, fontWeight: '600', fontSize: 14, marginBottom: 10 }}>📂 Local File Export / Import</Text>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <TouchableOpacity style={{ flex: 1, backgroundColor: C.cardAlt, borderWidth: 1, borderColor: C.borderStrong, borderRadius: 8, padding: 11, alignItems: 'center' }} onPress={handleExportLocalBackup} disabled={loading}>
+                <Text style={{ color: C.text, fontWeight: '600', fontSize: 12 }}>📤 Export File</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={{ flex: 1, backgroundColor: C.cardAlt, borderWidth: 1, borderColor: C.borderStrong, borderRadius: 8, padding: 11, alignItems: 'center' }} onPress={handleImportLocalBackup} disabled={loading}>
+                <Text style={{ color: C.text, fontWeight: '600', fontSize: 12 }}>📥 Import File</Text>
+              </TouchableOpacity>
+            </View>
           </Card>
 
-          <Text style={{ color: C.textFaint, fontSize: 11, textAlign: 'center', marginTop: 4 }}>Last Backup: {backupStatus}</Text>
+          <Text style={{ color: C.textFaint, fontSize: 11, textAlign: 'center', marginTop: 4 }}>Last Cloud Backup: {backupStatus}</Text>
         </View>
 
         {/* ── SESSIONS & ACCOUNT ── */}
