@@ -3111,12 +3111,12 @@ async function renderActiveChat() {
 
     bubble.appendChild(meta);
     wrapper.appendChild(bubble);
-    history.appendChild(wrapper);
+    historyContainer.appendChild(wrapper);
   }
 
   // Adjust scroll positions
   if (scrollAtBottom) {
-    history.scrollTop = history.scrollHeight;
+    historyContainer.scrollTop = historyContainer.scrollHeight;
   }
 
   // Update Request Action Banner and Input Bar Lock States
