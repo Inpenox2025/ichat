@@ -65,7 +65,7 @@ export default function AuthScreen({ onAuthSuccess }) {
     }
   }
 
-  async function handleVerifyOtp(replaceDeviceId = null) {
+  async function handleVerifyOtp(replaceDeviceId = null, revokeAll = false) {
     if (!otp || otp.length !== 6) {
       Alert.alert('Error', 'Please enter the 6-digit verification code');
       return;
@@ -105,7 +105,9 @@ export default function AuthScreen({ onAuthSuccess }) {
         public_key: keys.publicKey
       };
 
-      if (replaceDeviceId) {
+      if (revokeAll) {
+        payload.revoke_all = true;
+      } else if (replaceDeviceId) {
         payload.replace_device_id = replaceDeviceId;
       }
 
@@ -270,8 +272,16 @@ export default function AuthScreen({ onAuthSuccess }) {
           {step === 4 && (
             <View style={styles.form}>
               <Text style={styles.conflictHeader}>⚠️ Device Limit Exceeded</Text>
-              <Text style={styles.conflictDesc}>You have reached the maximum limit of 3 active devices. Select a device below to replace with this session:</Text>
+              <Text style={styles.conflictDesc}>You have reached the maximum limit of 3 active devices. Revoke all previous sessions to continue, or select a device to replace:</Text>
               
+              <TouchableOpacity 
+                style={[styles.button, { backgroundColor: '#ef4444', marginBottom: 16 }]} 
+                onPress={() => handleVerifyOtp(null, true)}
+                disabled={loading}
+              >
+                {loading ? <ActivityIndicator color="#ffffff" /> : <Text style={[styles.buttonText, { color: '#ffffff' }]}>⚡ Revoke All Sessions & Login</Text>}
+              </TouchableOpacity>
+
               {conflictDevices.map((dev) => (
                 <TouchableOpacity 
                   key={dev.device_id} 
@@ -279,7 +289,7 @@ export default function AuthScreen({ onAuthSuccess }) {
                   onPress={() => handleVerifyOtp(dev.device_id)}
                 >
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.conflictDeviceName}>{dev.device_name || 'Unknown Device'}</Text>
+                    <Text style={styles.conflictDeviceName}>{dev.device_name || 'Device Session'} ({dev.device_id.substring(0, 8)}...)</Text>
                     <Text style={styles.conflictDeviceDate}>Last active: {new Date(dev.last_active).toLocaleDateString()}</Text>
                   </View>
                   <View style={styles.replaceChip}>

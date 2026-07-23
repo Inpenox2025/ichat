@@ -42,7 +42,7 @@ module.exports = async function handler(req, res) {
     // ACTION: VERIFY-OTP
     // ----------------------------------------------------
     if (action === 'verify-otp') {
-      const { email, code, device_id, device_name, public_key, replace_device_id } = req.body;
+      const { email, code, device_id, device_name, public_key, replace_device_id, revoke_all } = req.body;
 
       if (!email || !code || !device_id || !public_key) {
         return res.status(400).json({ error: 'Email, code, device_id, and public_key are required' });
@@ -77,23 +77,27 @@ module.exports = async function handler(req, res) {
       }
 
       // Manage Devices for E2EE (Limit to 3)
-      const activeDevices = await sql`SELECT * FROM devices WHERE user_id = ${user.id}`;
-      const deviceExists = activeDevices.some(d => d.device_id === device_id);
+      if (revoke_all) {
+        await sql`DELETE FROM devices WHERE user_id = ${user.id}`;
+      } else {
+        const activeDevices = await sql`SELECT * FROM devices WHERE user_id = ${user.id}`;
+        const deviceExists = activeDevices.some(d => d.device_id === device_id);
 
-      if (!deviceExists && activeDevices.length >= 3) {
-        // Check if user requested to replace a specific device
-        if (replace_device_id) {
-          await sql`
-            DELETE FROM devices 
-            WHERE user_id = ${user.id} AND device_id = ${replace_device_id}
-          `;
-        } else {
-          // Return limit error and device list so user can choose to de-register one
-          return res.status(409).json({
-            error: 'MAX_DEVICES_EXCEEDED',
-            message: 'You have reached the maximum limit of 3 devices. Please de-register one to continue.',
-            devices: activeDevices.map(d => ({ device_id: d.device_id, device_name: d.device_name, last_active: d.last_active }))
-          });
+        if (!deviceExists && activeDevices.length >= 3) {
+          // Check if user requested to replace a specific device
+          if (replace_device_id) {
+            await sql`
+              DELETE FROM devices 
+              WHERE user_id = ${user.id} AND device_id = ${replace_device_id}
+            `;
+          } else {
+            // Return limit error and device list so user can choose to de-register one
+            return res.status(409).json({
+              error: 'MAX_DEVICES_EXCEEDED',
+              message: 'You have reached the maximum limit of 3 devices. Please de-register one to continue.',
+              devices: activeDevices.map(d => ({ device_id: d.device_id, device_name: d.device_name, last_active: d.last_active }))
+            });
+          }
         }
       }
 

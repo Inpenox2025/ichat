@@ -183,6 +183,8 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
     setLoading(true);
     setBackupStatusMsg('⏳ Step 1/3: Deriving key & encrypting database...');
     try {
+      await new Promise(r => setTimeout(r, 50));
+
       const pub = await AsyncStorage.getItem('ichat_identity_key_public');
       const priv = await AsyncStorage.getItem('ichat_identity_key_private');
       const payload = { chats, messages, keys: { publicKey: pub, privateKey: priv } };
@@ -190,6 +192,8 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
       const encrypted = encryptSymmetric(JSON.stringify(payload), keyBytes);
 
       setBackupStatusMsg('☁️ Step 2/3: Uploading encrypted payload to cloud account...');
+      await new Promise(r => setTimeout(r, 50));
+
       const res = await fetch(`${serverUrl}/api/backup`, {
         method: 'POST',
         headers: {
@@ -226,11 +230,16 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
       if (!res.ok) throw new Error(data.error || 'No backup found for this account.');
 
       setRestoreStatusMsg('🔑 Step 2/3: Deriving key & decrypting payload...');
+      await new Promise(r => setTimeout(r, 50));
+
       const blob = JSON.parse(data.backup_data);
       const keyBytes = pbkdf2Sync(restorePass, user.email, 2000, 32);
-      const decrypted = JSON.parse(decryptSymmetric(blob.ciphertext, blob.nonce, keyBytes));
+      const decryptedStr = decryptSymmetric(blob.ciphertext, blob.nonce, keyBytes);
+      const decrypted = JSON.parse(decryptedStr);
 
-      setRestoreStatusMsg('💾 Step 3/3: Restoring chats, messages & keys to local database...');
+      setRestoreStatusMsg('💾 Step 3/3: Restoring chats, messages & keys to database...');
+      await new Promise(r => setTimeout(r, 50));
+
       await AsyncStorage.setItem('ichat_identity_key_public', decrypted.keys.publicKey);
       await AsyncStorage.setItem('ichat_identity_key_private', decrypted.keys.privateKey);
       await AsyncStorage.setItem('ichat_chats', JSON.stringify(decrypted.chats));
@@ -238,11 +247,13 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
 
       onRestoreCompleted(decrypted.chats, decrypted.messages);
       setRestorePass('');
-      setRestoreStatusMsg('✅ Restore completed successfully!');
+      setRestoreStatusMsg('✅ Step 3/3: Restore completed successfully!');
       Alert.alert('Restore Complete', 'Encrypted chat history and keys restored successfully!');
     } catch (err) {
-      setRestoreStatusMsg('❌ Restore failed: Wrong passcode or corrupt backup data.');
-      Alert.alert('Restore failed', 'Wrong passcode or corrupt backup data.');
+      console.error('[RESTORE ERROR]', err);
+      const isPassErr = err.message.includes('Symmetric');
+      setRestoreStatusMsg(`❌ Restore failed: ${isPassErr ? 'Wrong passcode!' : err.message}`);
+      Alert.alert('Restore failed', isPassErr ? 'Wrong passcode! Please check your backup password.' : err.message);
     }
     finally { setLoading(false); }
   }

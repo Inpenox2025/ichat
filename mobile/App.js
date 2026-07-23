@@ -777,7 +777,7 @@ export default function App() {
     setMessages(restoredMessages);
   }
 
-  function handleLogout() {
+  async function handleLogout() {
     disconnectWebSocket();
     setToken(null);
     setUser(null);
@@ -786,7 +786,12 @@ export default function App() {
     setGroups([]);
     setMessages([]);
     setOutbox([]);
-    AsyncStorage.clear();
+    try {
+      await AsyncStorage.multiRemove([
+        'ichat_token', 'ichat_user', 'ichat_chats', 'ichat_messages',
+        'ichat_outbox', 'ichat_active_tab', 'ichat_last_route'
+      ]);
+    } catch (e) {}
   }
 
   function handleHangupCall() {
