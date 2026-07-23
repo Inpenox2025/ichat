@@ -1059,7 +1059,7 @@ async function handleIncomingMessage(data) {
     const sqlPayload = JSON.parse(payload);
     
     // 1. Fetch public keys of sender
-    const res = await fetch(`${API_BASE}/api/users/keys?username=${sender}`, {
+    const res = await fetch(`${API_BASE}/api/users/keys?action=keys&username=${sender}`, {
       headers: { 'Authorization': `Bearer ${state.token}` }
     });
     const result = await res.json();
