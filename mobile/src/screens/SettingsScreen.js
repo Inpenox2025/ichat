@@ -315,7 +315,7 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
 
       {/* ── HEADER ── */}
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, backgroundColor: C.bg, borderBottomWidth: 1, borderBottomColor: C.border }}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 20, backgroundColor: C.cardAlt }}>
+        <TouchableOpacity onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.navigate('MainHome')} style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 20, backgroundColor: C.cardAlt }}>
           <Ionicons name="arrow-back" size={20} color={C.text} />
         </TouchableOpacity>
         <Text style={{ fontSize: 18, fontWeight: '700', color: C.text }}>Settings</Text>

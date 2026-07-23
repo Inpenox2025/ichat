@@ -291,7 +291,7 @@ export default function ChatScreen({ route, navigation, messages, onSendMessage,
       >
         {/* Header bar */}
         <View style={styles.header}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.navigate('MainHome')}>
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
           
