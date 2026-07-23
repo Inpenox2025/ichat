@@ -284,12 +284,11 @@ function deleteSelectedChats() {
       state.messages = state.messages.filter(m => !selectedUsernames.includes(m.chatPartner));
 
       if (selectedUsernames.includes(state.activeChatPartner)) {
-        state.activeChatPartner = null;
-        document.getElementById('chatPane')?.classList.remove('active');
-        document.getElementById('chatEmptyState')?.classList.add('active');
+        closeActiveConversation();
       }
 
       saveStateToLocalStorage();
+      switchSidebarTab('home');
       exitChatsSelection();
       showToast(`${count} conversation${count > 1 ? 's' : ''} deleted`, 'info');
     }
@@ -2176,8 +2175,28 @@ function renderChatList() {
 }
 
 /* ═══════════ GROUPS & 3-TAB SIDEBAR CONTROLLERS ═══════════ */
+function closeActiveConversation() {
+  state.activeChatPartner = null;
+  state.activeGroup = null;
+  localStorage.removeItem('ichat_active_partner');
+  localStorage.removeItem('ichat_active_group');
+
+  const emptyState = document.getElementById('chatEmptyState');
+  if (emptyState) emptyState.classList.add('active');
+
+  const chatPane = document.getElementById('chatPane');
+  if (chatPane) chatPane.classList.remove('active');
+
+  const chatWin = document.getElementById('chatWindow');
+  if (chatWin) chatWin.classList.remove('active');
+
+  const sidebar = document.getElementById('sidebar');
+  if (sidebar) sidebar.classList.remove('inactive');
+}
+
 function switchSidebarTab(tabName) {
   state.activeSidebarTab = tabName;
+  localStorage.setItem('ichat_active_tab', tabName);
   
   const tabHome = document.getElementById('tabNavHome');
   const tabGroups = document.getElementById('tabNavGroups');
@@ -2400,12 +2419,11 @@ function deleteSelectedGroups() {
       state.messages = state.messages.filter(m => !selectedGroupIds.includes(m.chatPartner));
 
       if (state.activeGroup && selectedGroupIds.includes(state.activeGroup.id)) {
-        state.activeGroup = null;
-        document.getElementById('chatPane')?.classList.remove('active');
-        document.getElementById('chatEmptyState')?.classList.add('active');
+        closeActiveConversation();
       }
 
       saveStateToLocalStorage();
+      switchSidebarTab('groups');
       exitGroupsSelection();
       showToast(`${count} group${count > 1 ? 's' : ''} deleted`, 'info');
     }
@@ -2595,13 +2613,12 @@ async function executeExitGroup(groupId, showConfirm = true) {
     // Remove group locally
     state.groups = state.groups.filter(g => g.id !== groupId);
 
-    if (state.activeGroup && state.activeGroup.id === groupId) {
-      state.activeGroup = null;
-      document.getElementById('chatPane')?.classList.remove('active');
-      document.getElementById('chatEmptyState')?.classList.add('active');
+    if (!state.activeGroup || state.activeGroup.id === groupId) {
+      closeActiveConversation();
     }
 
     saveStateToLocalStorage();
+    switchSidebarTab('groups');
     renderGroupsList();
     if (showConfirm) showToast(`You left "${group.name}"`, 'info');
   };
@@ -2636,13 +2653,12 @@ function executeDeleteGroup(groupId) {
       state.groups = state.groups.filter(g => g.id !== groupId);
       state.messages = state.messages.filter(m => m.chatPartner !== groupId);
 
-      if (state.activeGroup && state.activeGroup.id === groupId) {
-        state.activeGroup = null;
-        document.getElementById('chatPane')?.classList.remove('active');
-        document.getElementById('chatEmptyState')?.classList.add('active');
+      if (!state.activeGroup || state.activeGroup.id === groupId) {
+        closeActiveConversation();
       }
 
       saveStateToLocalStorage();
+      switchSidebarTab('groups');
       renderGroupsList();
       showToast(`Group "${group.name}" deleted`, 'info');
     }
@@ -3744,12 +3760,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const backBtn = document.getElementById('btnBackToSidebar');
   if (backBtn) {
     backBtn.addEventListener('click', () => {
-      state.activeChatPartner = null;
-      localStorage.removeItem('ichat_active_partner');
-      document.getElementById('chatPane')?.classList.remove('active');
-      document.getElementById('chatEmptyState')?.classList.add('active');
-      document.getElementById('chatWindow')?.classList.remove('active');
-      document.getElementById('sidebar')?.classList.remove('inactive');
+      closeActiveConversation();
     });
   }
 
