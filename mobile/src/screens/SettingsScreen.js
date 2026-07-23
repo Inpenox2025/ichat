@@ -501,8 +501,8 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
             <Text style={{ color: C.textMuted, fontSize: 11, marginBottom: 10 }}>Securely back up your chat logs and E2EE keys to your account in the cloud.</Text>
             <TextInput style={{ backgroundColor: C.input, borderWidth: 1, borderColor: C.inputBorder, borderRadius: 8, color: C.text, padding: 10, fontSize: 13, marginBottom: 10 }} secureTextEntry value={backupPass} onChangeText={setBackupPass} placeholder="Set backup passcode (min 4 chars)" placeholderTextColor={C.textFaint} />
             <View style={{ flexDirection: 'row', gap: 8 }}>
-              <TouchableOpacity style={{ flex: 1, backgroundColor: C.accent, borderRadius: 8, padding: 12, alignItems: 'center' }} onPress={handleCloudBackup} disabled={loading}>
-                {loading ? <ActivityIndicator color="#0c101a" /> : <Text style={{ color: C.isDark ? '#0c101a' : '#ffffff', fontWeight: '700', fontSize: 13 }}>☁️ Backup to Cloud</Text>}
+              <TouchableOpacity style={{ flex: 1, backgroundColor: C.accent, borderRadius: 8, padding: 12, alignItems: 'center' }} onPress={handleCloudBackup} disabled={!!actionLoading}>
+                {actionLoading === 'backup' ? <ActivityIndicator color="#0c101a" /> : <Text style={{ color: C.isDark ? '#0c101a' : '#ffffff', fontWeight: '700', fontSize: 13 }}>☁️ Backup to Cloud</Text>}
               </TouchableOpacity>
             </View>
             {backupStatusMsg ? (
@@ -517,8 +517,8 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
             <Text style={{ color: C.text, fontWeight: '600', fontSize: 14, marginBottom: 4 }}>☁️ Restore from Cloud</Text>
             <Text style={{ color: C.textMuted, fontSize: 11, marginBottom: 10 }}>Restore encrypted chat history and security keys from your cloud account.</Text>
             <TextInput style={{ backgroundColor: C.input, borderWidth: 1, borderColor: C.inputBorder, borderRadius: 8, color: C.text, padding: 10, fontSize: 13, marginBottom: 10 }} secureTextEntry value={restorePass} onChangeText={setRestorePass} placeholder="Enter your backup passcode" placeholderTextColor={C.textFaint} />
-            <TouchableOpacity style={{ backgroundColor: C.cardAlt, borderWidth: 1, borderColor: C.borderStrong, borderRadius: 8, padding: 12, alignItems: 'center' }} onPress={handleCloudRestore} disabled={loading}>
-              {loading ? <ActivityIndicator color={C.text} /> : <Text style={{ color: C.text, fontWeight: '700', fontSize: 13 }}>☁️ Restore from Cloud</Text>}
+            <TouchableOpacity style={{ backgroundColor: C.cardAlt, borderWidth: 1, borderColor: C.borderStrong, borderRadius: 8, padding: 12, alignItems: 'center' }} onPress={handleCloudRestore} disabled={!!actionLoading}>
+              {actionLoading === 'restore' ? <ActivityIndicator color={C.text} /> : <Text style={{ color: C.text, fontWeight: '700', fontSize: 13 }}>☁️ Restore from Cloud</Text>}
             </TouchableOpacity>
             {restoreStatusMsg ? (
               <View style={{ marginTop: 10, padding: 8, backgroundColor: C.accentBg, borderRadius: 6, borderWidth: 1, borderColor: C.border }}>
@@ -531,11 +531,11 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
           <Card C={C}>
             <Text style={{ color: C.text, fontWeight: '600', fontSize: 14, marginBottom: 10 }}>📂 Local File Export / Import</Text>
             <View style={{ flexDirection: 'row', gap: 8 }}>
-              <TouchableOpacity style={{ flex: 1, backgroundColor: C.cardAlt, borderWidth: 1, borderColor: C.borderStrong, borderRadius: 8, padding: 11, alignItems: 'center' }} onPress={handleExportLocalBackup} disabled={loading}>
-                <Text style={{ color: C.text, fontWeight: '600', fontSize: 12 }}>📤 Export File</Text>
+              <TouchableOpacity style={{ flex: 1, backgroundColor: C.cardAlt, borderWidth: 1, borderColor: C.borderStrong, borderRadius: 8, padding: 11, alignItems: 'center' }} onPress={handleExportLocalBackup} disabled={!!actionLoading}>
+                {actionLoading === 'export' ? <ActivityIndicator color={C.text} /> : <Text style={{ color: C.text, fontWeight: '600', fontSize: 12 }}>📤 Export File</Text>}
               </TouchableOpacity>
-              <TouchableOpacity style={{ flex: 1, backgroundColor: C.cardAlt, borderWidth: 1, borderColor: C.borderStrong, borderRadius: 8, padding: 11, alignItems: 'center' }} onPress={handleImportLocalBackup} disabled={loading}>
-                <Text style={{ color: C.text, fontWeight: '600', fontSize: 12 }}>📥 Import File</Text>
+              <TouchableOpacity style={{ flex: 1, backgroundColor: C.cardAlt, borderWidth: 1, borderColor: C.borderStrong, borderRadius: 8, padding: 11, alignItems: 'center' }} onPress={handleImportLocalBackup} disabled={!!actionLoading}>
+                {actionLoading === 'import' ? <ActivityIndicator color={C.text} /> : <Text style={{ color: C.text, fontWeight: '600', fontSize: 12 }}>📥 Import File</Text>}
               </TouchableOpacity>
             </View>
           </Card>
@@ -552,8 +552,8 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
             <Text style={{ color: C.text, fontWeight: '600', fontSize: 14 }}>Log Out (This Device)</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: 'rgba(217,119,6,0.12)', borderWidth: 1, borderColor: '#d97706', borderRadius: 12, padding: 16, marginBottom: 10 }} onPress={handleLogoutAllDevices} disabled={loading}>
-            {loading ? <ActivityIndicator color="#d97706" /> : (
+          <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: 'rgba(217,119,6,0.12)', borderWidth: 1, borderColor: '#d97706', borderRadius: 12, padding: 16, marginBottom: 10 }} onPress={handleLogoutAllDevices} disabled={!!actionLoading}>
+            {actionLoading === 'logout-all' ? <ActivityIndicator color="#d97706" /> : (
               <>
                 <Ionicons name="phone-portrait-outline" size={20} color="#d97706" />
                 <Text style={{ color: '#d97706', fontWeight: '600', fontSize: 14 }}>Logout from All Sessions</Text>
@@ -561,8 +561,8 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
             )}
           </TouchableOpacity>
 
-          <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: 'rgba(239,68,68,0.12)', borderWidth: 1, borderColor: '#ef4444', borderRadius: 12, padding: 16 }} onPress={handleDeleteAccount} disabled={loading}>
-            {loading ? <ActivityIndicator color="#ef4444" /> : (
+          <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: 'rgba(239,68,68,0.12)', borderWidth: 1, borderColor: '#ef4444', borderRadius: 12, padding: 16 }} onPress={handleDeleteAccount} disabled={!!actionLoading}>
+            {actionLoading === 'delete-account' ? <ActivityIndicator color="#ef4444" /> : (
               <>
                 <Ionicons name="trash-outline" size={20} color="#ef4444" />
                 <Text style={{ color: '#ef4444', fontWeight: '600', fontSize: 14 }}>Delete & Wipe Account</Text>
