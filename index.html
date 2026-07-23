@@ -24,6 +24,9 @@
   
   <!-- Feather Icons CDN -->
   <script src="https://cdn.jsdelivr.net/npm/feather-icons/dist/feather.min.js"></script>
+  
+  <!-- Google Identity Services SDK for Google Drive Backup -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
 
@@ -481,30 +484,39 @@
             </div>
           </div>
 
-          <!-- Section 3: Backup & Restore -->
+          <!-- Section 3: Google Drive Backup & Schedule -->
           <div class="settings-section">
-            <h3><i data-feather="upload-cloud"></i> Backup & Migration</h3>
-            <p class="section-desc">Your chat logs are encrypted client-side using a passcode. The server only holds raw ciphertext blobs.</p>
+            <h3><i data-feather="upload-cloud"></i> Google Drive E2EE Backup</h3>
+            <p class="section-desc">Backups are encrypted client-side using PBKDF2 + TweetNaCl and saved directly to your Google Drive (0 bytes stored on database server).</p>
+
+            <div class="form-group" style="margin-bottom: 16px;">
+              <label for="backupScheduleSelect" style="font-size: 13px; font-weight: 700; color: var(--text-primary); margin-bottom: 6px; display: block;">Automated Backup Schedule</label>
+              <select id="backupScheduleSelect" class="form-control" style="background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border);">
+                <option value="never">Never (Manual Only)</option>
+                <option value="daily">Daily Automated Backups (Every 24 Hours)</option>
+              </select>
+            </div>
+
             <div class="backup-grid">
               <div class="backup-action-card">
-                <h4>Secure Backup</h4>
-                <p>Compile and upload E2EE chat history and identity keys.</p>
+                <h4>Back Up to Google Drive</h4>
+                <p>Encrypt & upload E2EE chat history to Google Drive.</p>
                 <div class="form-group margin-top-xs">
                   <input type="password" id="backupPasscode" placeholder="Set backup password" class="form-control">
                 </div>
                 <button type="button" class="btn btn-primary btn-block btn-sm" id="btnCreateBackup">
-                  <i data-feather="shield"></i> Back Up Now
+                  <i data-feather="upload-cloud"></i> Upload to Google Drive
                 </button>
               </div>
               
               <div class="backup-action-card">
-                <h4>Restore Data</h4>
-                <p>Restore chat history and identity keys to this device.</p>
+                <h4>Restore from Google Drive</h4>
+                <p>Fetch & decrypt backup directly from Google Drive.</p>
                 <div class="form-group margin-top-xs">
                   <input type="password" id="restorePasscode" placeholder="Enter backup password" class="form-control">
                 </div>
                 <button type="button" class="btn btn-outline btn-block btn-sm" id="btnRestoreBackup">
-                  <i data-feather="download"></i> Restore Backup
+                  <i data-feather="download-cloud"></i> Restore from Google Drive
                 </button>
               </div>
             </div>
@@ -674,6 +686,41 @@
         </div>
       </div>
     </div>
+
+    <!-- 9. ATTACHMENT SELECTION MODAL -->
+    <div id="attachmentPickerModal" class="modal-overlay">
+      <div class="modal-card glass-panel" style="max-width: 380px;">
+        <div class="modal-header">
+          <div class="modal-title">
+            <i data-feather="paperclip" class="modal-title-icon"></i>
+            <h3>Share Attachment</h3>
+          </div>
+          <button type="button" class="icon-btn modal-close-btn" id="btnCloseAttachmentModal">
+            <i data-feather="x"></i>
+          </button>
+        </div>
+        <div class="modal-body" style="display: flex; flex-direction: column; gap: 12px; padding: 16px 20px 24px;">
+          <button type="button" class="btn btn-outline btn-block" id="btnPickGalleryMedia" style="display: flex; align-items: center; justify-content: flex-start; gap: 12px; padding: 14px 16px;">
+            <i data-feather="image" style="stroke: var(--accent); width: 20px; height: 20px;"></i>
+            <div style="text-align: left;">
+              <div style="font-weight: 700; font-size: 14px; color: var(--text-primary);">Gallery / Photos & Videos</div>
+              <div style="font-size: 11px; color: var(--text-muted);">Compressed to ~10% size for fast sharing</div>
+            </div>
+          </button>
+          <button type="button" class="btn btn-outline btn-block" id="btnPickDocumentFile" style="display: flex; align-items: center; justify-content: flex-start; gap: 12px; padding: 14px 16px;">
+            <i data-feather="file-text" style="stroke: var(--accent); width: 20px; height: 20px;"></i>
+            <div style="text-align: left;">
+              <div style="font-weight: 700; font-size: 14px; color: var(--text-primary);">Files & Documents</div>
+              <div style="font-size: 11px; color: var(--text-muted);">Uncompressed original binary (Max 500 MB)</div>
+            </div>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Hidden file inputs -->
+    <input type="file" id="fileInputGallery" accept="image/*,video/*" style="display: none;">
+    <input type="file" id="fileInputDocument" accept="*/*" style="display: none;">
 
     <!-- 7. FLOATING TOAST NOTIFICATION CONTAINER (Replaces native browser alert) -->
     <div id="toastContainer" class="toast-container"></div>

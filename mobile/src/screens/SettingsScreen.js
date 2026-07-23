@@ -20,6 +20,22 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
   const [chatStorageList, setChatStorageList] = useState([]);
   const [expandedChats, setExpandedChats] = useState({});
 
+  // Backup schedule
+  const [backupSchedule, setBackupSchedule] = useState('never');
+
+  useEffect(() => {
+    async function loadSchedule() {
+      const sched = await AsyncStorage.getItem('ichat_backup_schedule');
+      if (sched) setBackupSchedule(sched);
+    }
+    loadSchedule();
+  }, []);
+
+  async function handleScheduleChange(mode) {
+    setBackupSchedule(mode);
+    await AsyncStorage.setItem('ichat_backup_schedule', mode);
+  }
+
   useEffect(() => {
     calculateStorageSizes();
     loadBackupStatus();
@@ -446,11 +462,30 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
           <Ionicons name="cloud-upload-outline" size={20} color="#00f2fe" />
-          <Text style={styles.sectionTitle}>Backup & Migration</Text>
+          <Text style={styles.sectionTitle}>Google Drive Backup & Schedule</Text>
         </View>
-        
+
+        {/* Schedule Selector */}
+        <View style={{ marginBottom: 16 }}>
+          <Text style={{ color: '#a0aec0', fontSize: 12, fontWeight: '700', marginBottom: 8, textTransform: 'uppercase' }}>Automated Backup Schedule</Text>
+          <View style={styles.themeGrid}>
+            <TouchableOpacity 
+              style={[styles.themeBtn, backupSchedule === 'never' && styles.themeBtnActive]}
+              onPress={() => handleScheduleChange('never')}
+            >
+              <Text style={[styles.themeText, backupSchedule === 'never' && styles.themeTextActive]}>Never (Manual)</Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={[styles.themeBtn, backupSchedule === 'daily' && styles.themeBtnActive]}
+              onPress={() => handleScheduleChange('daily')}
+            >
+              <Text style={[styles.themeText, backupSchedule === 'daily' && styles.themeTextActive]}>Daily (24h)</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
         <View style={styles.backupCard}>
-          <Text style={styles.backupTitle}>Upload Backup</Text>
+          <Text style={styles.backupTitle}>Upload to Google Drive</Text>
           <TextInput
             style={styles.backupInput}
             secureTextEntry
@@ -465,7 +500,7 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
         </View>
 
         <View style={styles.backupCard}>
-          <Text style={styles.backupTitle}>Restore Backup</Text>
+          <Text style={styles.backupTitle}>Restore from Google Drive</Text>
           <TextInput
             style={styles.backupInput}
             secureTextEntry

@@ -77,6 +77,18 @@ export default function ChatScreen({ route, navigation, messages, onSendMessage,
     }
   }
 
+  function handleAttachmentPress() {
+    Alert.alert(
+      'Share Attachment',
+      'Choose attachment type:',
+      [
+        { text: 'Gallery / Photos & Videos', onPress: handlePickImage },
+        { text: 'Files & Documents (Max 500MB)', onPress: handlePickDocument },
+        { text: 'Cancel', style: 'cancel' }
+      ]
+    );
+  }
+
   // Pick Media image
   async function handlePickImage() {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -86,12 +98,13 @@ export default function ChatScreen({ route, navigation, messages, onSendMessage,
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.8,
+      mediaTypes: ImagePicker.MediaTypeOptions.All,
+      quality: 0.6, // ~10% compression for photos
     });
 
     if (!result.canceled && result.assets && result.assets.length > 0) {
-      uploadMediaFile(result.assets[0].uri, result.assets[0].fileName || 'image.jpg', 'image/jpeg');
+      const asset = result.assets[0];
+      uploadMediaFile(asset.uri, asset.fileName || 'media.jpg', asset.mimeType || 'image/jpeg');
     }
   }
 
@@ -103,6 +116,10 @@ export default function ChatScreen({ route, navigation, messages, onSendMessage,
 
     if (!result.canceled && result.assets && result.assets.length > 0) {
       const file = result.assets[0];
+      if (file.size > 500 * 1024 * 1024) {
+        Alert.alert('File Too Large', 'File exceeds maximum size limit of 500 MB.');
+        return;
+      }
       uploadMediaFile(file.uri, file.name, file.mimeType || 'application/octet-stream');
     }
   }
@@ -318,7 +335,7 @@ export default function ChatScreen({ route, navigation, messages, onSendMessage,
 
       {/* Chat inputs panel */}
       <View style={styles.inputBar}>
-        <TouchableOpacity style={styles.attachBtn} onPress={handlePickImage} onLongPress={handlePickDocument}>
+        <TouchableOpacity style={styles.attachBtn} onPress={handleAttachmentPress}>
           <Ionicons name="add" size={24} color="#a0aec0" />
         </TouchableOpacity>
         

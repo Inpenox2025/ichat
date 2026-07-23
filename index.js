@@ -1272,11 +1272,71 @@ function updateContactStatusesUI() {
 }
 
 
+function compressImageFile(file) {
+  return new Promise((resolve) => {
+    if (!file.type.startsWith('image/')) {
+      return resolve(file);
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+        const maxDim = 1280;
+
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        canvas.toBlob((blob) => {
+          if (blob) {
+            const compressedFile = new File([blob], file.name, {
+              type: 'image/jpeg',
+              lastModified: Date.now()
+            });
+            resolve(compressedFile);
+          } else {
+            resolve(file);
+          }
+        }, 'image/jpeg', 0.6); // ~10% size compression
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 /* ═══════════ MEDIA UPLOAD & ENCRYPT/DECRYPT ═══════════ */
-async function encryptAndUploadFile(file) {
+async function encryptAndUploadFile(rawFile, isGallery = false) {
   try {
+    // Enforce 500 MB limit
+    if (rawFile.size > 500 * 1024 * 1024) {
+      showToast('File exceeds maximum size limit of 500 MB', 'warning');
+      return null;
+    }
+
+    let fileToUpload = rawFile;
+    if (isGallery || rawFile.type.startsWith('image/')) {
+      fileToUpload = await compressImageFile(rawFile);
+    }
+
     // 1. Read file bytes
-    const arrayBuffer = await file.arrayBuffer();
+    const arrayBuffer = await fileToUpload.arrayBuffer();
     const fileBytes = new Uint8Array(arrayBuffer);
 
     // 2. Generate random 256-bit media encryption key and nonce
@@ -1289,9 +1349,9 @@ async function encryptAndUploadFile(file) {
     // 4. Wrap ciphertext in a Blob and append to form
     const encryptedBlob = new Blob([encryptedBytes], { type: 'application/octet-stream' });
     const formData = new FormData();
-    formData.append('file', encryptedBlob, file.name);
+    formData.append('file', encryptedBlob, fileToUpload.name);
 
-    // 5. Upload encrypted binary to server
+    // 5. Upload encrypted binary to server endpoint
     const res = await fetch(`${API_BASE}/api/upload`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${state.token}` },
@@ -1299,26 +1359,25 @@ async function encryptAndUploadFile(file) {
     });
 
     const result = await res.json();
-    if (!result.success) throw new Error(result.error);
+    if (!result.success) throw new Error(result.error || 'Upload failed');
 
     // 6. Cache decrypted file in IndexedDB immediately for instant local render
-    await saveMediaToLocalDB(result.url, arrayBuffer, file.type);
-    state.localMediaCache.set(result.url, URL.createObjectURL(new Blob([arrayBuffer], { type: file.type })));
+    await saveMediaToLocalDB(result.url, arrayBuffer, fileToUpload.type);
+    state.localMediaCache.set(result.url, URL.createObjectURL(new Blob([arrayBuffer], { type: fileToUpload.type })));
 
     // Return E2EE media descriptor to embed in chat message packet
     return {
       url: result.url,
-      filename: file.name,
-      type: file.type,
-      size: file.size,
-      // Passkeys packed in base64. These will be symmetrically encrypted along with the message text!
+      filename: fileToUpload.name,
+      type: fileToUpload.type,
+      size: fileToUpload.size,
       encryptedKeyBase64: encodeBase64(mediaKey),
       mediaNonceBase64: encodeBase64(mediaNonce)
     };
 
   } catch (error) {
     console.error('[MEDIA] Failed to encrypt or upload file:', error);
-    alert('Failed to upload file. Check size limits (10MB).');
+    showToast('Failed to upload file. Check size limits (500 MB).', 'warning');
     return null;
   }
 }
@@ -1763,7 +1822,97 @@ function triggerLogOut() {
 }
 
 
-/* ═══════════ ZERO-KNOWLEDGE BACKUP & RESTORE ═══════════ */
+/* ═══════════ GOOGLE DRIVE ZERO-KNOWLEDGE BACKUP & RESTORE ═══════════ */
+let googleDriveAccessToken = null;
+
+function getGoogleAccessToken() {
+  return new Promise((resolve, reject) => {
+    if (googleDriveAccessToken) return resolve(googleDriveAccessToken);
+
+    if (!window.google || !google.accounts || !google.accounts.oauth2) {
+      return reject(new Error('Google Identity Services SDK not loaded'));
+    }
+
+    const client = google.accounts.oauth2.initTokenClient({
+      client_id: '466810237759-994356456012.apps.googleusercontent.com',
+      scope: 'https://www.googleapis.com/auth/drive.file',
+      callback: (response) => {
+        if (response.error) {
+          return reject(new Error(response.error_description || response.error));
+        }
+        googleDriveAccessToken = response.access_token;
+        resolve(googleDriveAccessToken);
+      }
+    });
+
+    client.requestAccessToken();
+  });
+}
+
+async function uploadBackupToGoogleDrive(backupBlobString) {
+  const token = await getGoogleAccessToken();
+
+  const searchRes = await fetch("https://www.googleapis.com/drive/v3/files?q=name='ichat_e2ee_backup.json' and trashed=false", {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  const searchData = await searchRes.json();
+  const existingFile = searchData.files && searchData.files[0];
+
+  const metadata = {
+    name: 'ichat_e2ee_backup.json',
+    mimeType: 'application/json'
+  };
+
+  const form = new FormData();
+  form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+  form.append('file', new Blob([backupBlobString], { type: 'application/json' }));
+
+  let uploadRes;
+  if (existingFile) {
+    uploadRes = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${existingFile.id}?uploadType=multipart`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${token}` },
+      body: form
+    });
+  } else {
+    uploadRes = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: form
+    });
+  }
+
+  if (!uploadRes.ok) {
+    const errData = await uploadRes.json();
+    throw new Error(errData.error?.message || 'Google Drive upload failed');
+  }
+
+  return true;
+}
+
+async function downloadBackupFromGoogleDrive() {
+  const token = await getGoogleAccessToken();
+
+  const searchRes = await fetch("https://www.googleapis.com/drive/v3/files?q=name='ichat_e2ee_backup.json' and trashed=false", {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  const searchData = await searchRes.json();
+  if (!searchData.files || searchData.files.length === 0) {
+    throw new Error('No ichat_e2ee_backup.json backup file found in your Google Drive.');
+  }
+
+  const fileId = searchData.files[0].id;
+  const fileRes = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+
+  if (!fileRes.ok) {
+    throw new Error('Failed to download backup from Google Drive');
+  }
+
+  return await fileRes.text();
+}
+
 async function executeBackup(passcode) {
   if (!passcode || passcode.length < 4) {
     alert('Please specify a strong backup password (at least 4 characters).');
@@ -1774,14 +1923,13 @@ async function executeBackup(passcode) {
   const originalHtml = btn.innerHTML;
 
   btn.disabled = true;
-  btn.innerHTML = '<span>Backing Up...</span><i data-feather="loader" class="animate-pulse"></i>';
+  btn.innerHTML = '<span>Uploading to Drive...</span><i data-feather="loader" class="animate-pulse"></i>';
   feather.replace();
 
   const backupStatusEl = document.getElementById('backupStatusText');
   backupStatusEl.innerText = 'Creating secure backup...';
 
   try {
-    // 1. Pack database
     const payloadObject = {
       chats: state.chats,
       messages: state.messages,
@@ -1792,25 +1940,22 @@ async function executeBackup(passcode) {
     };
     const plaintext = JSON.stringify(payloadObject);
 
-    // 2. Derive key from password using Web Crypto PBKDF2 (salt is the user email)
-    const salt = state.user.email;
+    const salt = state.user?.email || 'ichat_salt';
     const derivedKeyBytes = await pbkdf2(passcode, salt, 32);
 
-    // 3. Encrypt data symmetrically using NaCl secretbox
     const encrypted = encryptSymmetric(plaintext, derivedKeyBytes);
-    
-    // Package blob: { ciphertext, nonce }
     const backupBlobString = JSON.stringify(encrypted);
 
-    // 4. Upload to server
-    await apiCall('/api/backup/upload', 'POST', { backup_data: backupBlobString });
-    
+    backupStatusEl.innerText = 'Uploading to Google Drive...';
+    await uploadBackupToGoogleDrive(backupBlobString);
+
     const timeStr = new Date().toLocaleString();
-    backupStatusEl.innerText = `Backup successfully uploaded! Date: ${timeStr}`;
+    backupStatusEl.innerText = `Backup successfully uploaded to Google Drive! (${timeStr})`;
     localStorage.setItem('ichat_backup_status', timeStr);
+    localStorage.setItem('ichat_backup_last_timestamp', new Date().toISOString());
   } catch (err) {
-    console.error('[BACKUP ERROR]', err);
-    backupStatusEl.innerText = 'Failed to compile backup: ' + err.message;
+    console.error('[GOOGLE DRIVE BACKUP ERROR]', err);
+    backupStatusEl.innerText = 'Failed to upload backup: ' + err.message;
   } finally {
     btn.disabled = false;
     btn.innerHTML = originalHtml;
@@ -1828,28 +1973,24 @@ async function executeRestore(passcode) {
   const originalHtml = btn.innerHTML;
 
   btn.disabled = true;
-  btn.innerHTML = '<span>Restoring...</span><i data-feather="loader" class="animate-pulse"></i>';
+  btn.innerHTML = '<span>Fetching from Drive...</span><i data-feather="loader" class="animate-pulse"></i>';
   feather.replace();
 
   const backupStatusEl = document.getElementById('backupStatusText');
-  backupStatusEl.innerText = 'Downloading backup blob...';
+  backupStatusEl.innerText = 'Downloading backup from Google Drive...';
 
   try {
-    // 1. Fetch encrypted packet from server
-    const data = await apiCall('/api/backup/download', 'GET');
-    
-    backupStatusEl.innerText = 'Decrypting database...';
-    const encryptedBlob = JSON.parse(data.backup_data);
+    const backupBlobString = await downloadBackupFromGoogleDrive();
 
-    // 2. Derive decryption key from passcode
-    const salt = state.user.email;
+    backupStatusEl.innerText = 'Decrypting database...';
+    const encryptedBlob = JSON.parse(backupBlobString);
+
+    const salt = state.user?.email || 'ichat_salt';
     const derivedKeyBytes = await pbkdf2(passcode, salt, 32);
 
-    // 3. Decrypt ciphertext using NaCl secretbox
     const decryptedJsonString = decryptSymmetric(encryptedBlob.ciphertext, encryptedBlob.nonce, derivedKeyBytes);
     const restored = JSON.parse(decryptedJsonString);
 
-    // 4. Verify keys match or restore them
     state.chats = restored.chats;
     state.messages = restored.messages;
     state.keys = {
@@ -1857,20 +1998,18 @@ async function executeRestore(passcode) {
       privateKey: decodeBase64(restored.keys.privateKey)
     };
 
-    // Save to storage
     localStorage.setItem('ichat_identity_key_public', restored.keys.publicKey);
     localStorage.setItem('ichat_identity_key_private', restored.keys.privateKey);
     saveStateToLocalStorage();
 
-    // Re-render
     renderChatList();
     renderActiveChat();
     updateStorageStatsUI();
 
-    backupStatusEl.innerText = 'Database successfully restored!';
+    backupStatusEl.innerText = 'Database successfully restored from Google Drive!';
   } catch (err) {
     console.error('[RESTORE ERROR]', err);
-    backupStatusEl.innerText = 'Decryption failed. Check passcode.';
+    backupStatusEl.innerText = 'Decryption failed: ' + err.message;
   } finally {
     btn.disabled = false;
     btn.innerHTML = originalHtml;
@@ -3525,26 +3664,67 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // 6. Media Attachment input Trigger
+  // 6. Media Attachment Triggers & Modal
   const attachBtn = document.getElementById('btnAttachFile');
-  const fileInput = document.getElementById('mediaFileInput');
+  const attachmentModal = document.getElementById('attachmentPickerModal');
+  const btnCloseAttachment = document.getElementById('btnCloseAttachmentModal');
 
-  attachBtn.addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', async () => {
-    const file = fileInput.files[0];
-    if (file && state.activeChatPartner) {
-      attachBtn.innerHTML = '<i data-feather="loader" class="animate-pulse"></i>';
+  const galleryInput = document.getElementById('fileInputGallery');
+  const documentInput = document.getElementById('fileInputDocument');
+
+  if (attachBtn) {
+    attachBtn.addEventListener('click', () => {
+      if (attachmentModal) attachmentModal.classList.add('active');
+    });
+  }
+
+  if (btnCloseAttachment) {
+    btnCloseAttachment.addEventListener('click', () => {
+      if (attachmentModal) attachmentModal.classList.remove('active');
+    });
+  }
+
+  document.getElementById('btnPickGalleryMedia')?.addEventListener('click', () => {
+    if (attachmentModal) attachmentModal.classList.remove('active');
+    if (galleryInput) galleryInput.click();
+  });
+
+  document.getElementById('btnPickDocumentFile')?.addEventListener('click', () => {
+    if (attachmentModal) attachmentModal.classList.remove('active');
+    if (documentInput) documentInput.click();
+  });
+
+  const handleFileSelect = async (file, isGallery) => {
+    const targetId = state.activeGroup ? state.activeGroup : state.activeChatPartner;
+    if (file && targetId) {
+      if (attachBtn) attachBtn.innerHTML = '<i data-feather="loader" class="animate-pulse"></i>';
       feather.replace();
-      
-      const mediaResult = await encryptAndUploadFile(file);
+
+      const mediaResult = await encryptAndUploadFile(file, isGallery);
       if (mediaResult) {
-        // Send file message packet
-        await sendE2EEMessage(state.activeChatPartner, null, mediaResult);
+        if (state.activeGroup) {
+          sendE2EEGroupMessage(state.activeGroup, null, mediaResult);
+        } else {
+          sendE2EEMessage(state.activeChatPartner, null, mediaResult);
+        }
       }
-      
-      attachBtn.innerHTML = '<i data-feather="paperclip"></i>';
-      fileInput.value = '';
+
+      if (attachBtn) attachBtn.innerHTML = '<i data-feather="paperclip"></i>';
       feather.replace();
+    }
+  };
+
+  galleryInput?.addEventListener('change', () => {
+    if (galleryInput.files && galleryInput.files[0]) {
+      handleFileSelect(galleryInput.files[0], true);
+      galleryInput.value = '';
+    }
+  });
+
+  documentInput?.addEventListener('change', () => {
+    if (documentInput.files && documentInput.files[0]) {
+      handleFileSelect(documentInput.files[0], false);
+      documentInput.value = '';
     }
   });
 
@@ -3552,6 +3732,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   const settingsModal = document.getElementById('settingsModal');
   const btnSettings = document.getElementById('btnSettings');
   const btnCloseSettings = document.getElementById('btnCloseSettings');
+  const backupScheduleSelect = document.getElementById('backupScheduleSelect');
+
+  if (backupScheduleSelect) {
+    backupScheduleSelect.value = localStorage.getItem('ichat_backup_schedule') || 'never';
+    backupScheduleSelect.addEventListener('change', (e) => {
+      localStorage.setItem('ichat_backup_schedule', e.target.value);
+      showToast(`Backup schedule set to: ${e.target.options[e.target.selectedIndex].text}`, 'info');
+    });
+  }
 
   btnSettings.addEventListener('click', () => {
     updateStorageStatsUI();

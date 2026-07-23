@@ -3,29 +3,12 @@ const fs = require('fs');
 const multer = require('multer');
 const { verifyToken } = require('../shared/crypto-helper');
 
-const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
-
-// Ensure uploads folder exists
-if (!fs.existsSync(UPLOADS_DIR)) {
-  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-}
-
-// Multer Storage Configuration
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, UPLOADS_DIR);
-  },
-  filename: (req, file, cb) => {
-    // Save with a random hex string to obscure names
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    const ext = path.extname(file.originalname);
-    cb(null, 'file-' + uniqueSuffix + ext);
-  }
-});
+// Memory storage to support Vercel serverless read-only filesystem environments
+const storage = multer.memoryStorage();
 
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+  limits: { fileSize: 500 * 1024 * 1024 } // 500MB limit
 }).single('file');
 
 module.exports = function handler(req, res) {
@@ -53,13 +36,15 @@ module.exports = function handler(req, res) {
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    // Generate public file url
-    const fileUrl = `/uploads/${req.file.filename}`;
-    
+    // Convert file buffer to base64 data URL payload
+    const mimeType = req.file.mimetype || 'application/octet-stream';
+    const base64Data = req.file.buffer.toString('base64');
+    const dataUrl = `data:${mimeType};base64,${base64Data}`;
+
     return res.status(200).json({
       success: true,
-      url: fileUrl,
-      filename: req.file.filename,
+      url: dataUrl,
+      filename: req.file.originalname,
       size: req.file.size
     });
   });
