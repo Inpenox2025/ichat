@@ -1823,6 +1823,7 @@ function triggerLogOut() {
 
 
 /* ═══════════ GOOGLE DRIVE ZERO-KNOWLEDGE BACKUP & RESTORE ═══════════ */
+let googleDriveAccessToken = null;
 const GOOGLE_CLIENT_ID = '106602076966-j449t85if2ul4bjhuks07fhf8d1cnp1c.apps.googleusercontent.com';
 
 function getGoogleAccessToken() {
