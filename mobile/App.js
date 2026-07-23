@@ -18,6 +18,7 @@ import GroupDetailsModal from './src/screens/GroupDetailsModal';
 // Import Services
 import { connectWebSocket, disconnectWebSocket, sendSocketMessage, addSocketListener } from './src/services/websocket';
 import { decryptAsymmetric, decryptSymmetric, encryptAsymmetric, encryptSymmetric, decodeBase64, encodeBase64, decodeUTF8, encodeUTF8, nacl } from './src/services/crypto';
+import { registerForPushNotificationsAsync, presentLocalNotification } from './src/services/notifications';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -179,6 +180,7 @@ export default function App() {
           if (savedOutbox) setOutbox(JSON.parse(savedOutbox));
         }
         setTheme(savedTheme);
+        registerForPushNotificationsAsync();
       } catch (e) {
         console.error(e);
       } finally {
@@ -257,6 +259,11 @@ export default function App() {
       if (data.type === 'call-offer') {
         const { sender } = data;
         setCallState({ partner: sender, status: 'ringing' });
+        presentLocalNotification({
+          title: `Incoming Voice Call`,
+          body: `@${sender} is calling you. Tap to join encrypted call.`,
+          data: { type: 'call', sender }
+        });
         navigationRef.current?.navigate('Call', { username: sender, direction: 'incoming' });
         return;
       }
@@ -370,6 +377,23 @@ export default function App() {
         }
         setChats(updatedChats);
         await AsyncStorage.setItem('ichat_chats', JSON.stringify(updatedChats));
+      }
+
+      // Present local push notification if conversation is not currently open
+      if (!isSenderSync && sender !== current.user?.username) {
+        if (isGroup && current.activeGroup?.id !== groupId) {
+          presentLocalNotification({
+            title: `${groupName || 'Group Chat'} • @${sender}`,
+            body: decryptedBody || (media ? `📷 Sent attachment: ${media.filename}` : 'New encrypted message'),
+            data: { groupId }
+          });
+        } else if (!isGroup && current.activePartner !== partner) {
+          presentLocalNotification({
+            title: `@${sender}`,
+            body: decryptedBody || (media ? `📷 Sent attachment: ${media.filename}` : 'New encrypted message'),
+            data: { username: partner }
+          });
+        }
       }
 
       if (!isSenderSync && !isGroup) {
