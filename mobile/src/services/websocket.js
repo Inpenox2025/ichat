@@ -66,9 +66,10 @@ export function connectWebSocket(serverUrl, token) {
     socket = null;
   }
 
-  // On web, WebSocket to Vercel often fails (no WS upgrade support).
-  // Try WS first, fall back to HTTP polling after MAX_WS_ATTEMPTS.
-  if (reconnectAttempts >= MAX_WS_ATTEMPTS) {
+  // On Vercel deployments (*.vercel.app or *.inspenox.in), WebSockets are not supported by serverless functions.
+  // Switch to HTTP polling directly to avoid console WebSocket handshake errors.
+  const isVercelHost = serverUrl.includes('inspenox.in') || serverUrl.includes('vercel.app');
+  if (isVercelHost || reconnectAttempts >= MAX_WS_ATTEMPTS) {
     startHttpPolling(serverUrl, token);
     return;
   }

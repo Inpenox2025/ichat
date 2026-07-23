@@ -180,7 +180,7 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
       Alert.alert('Passcode Required', 'Please set a backup passcode (at least 4 characters).');
       return;
     }
-    setLoading(true);
+    setActionLoading('backup');
     setBackupStatusMsg('⏳ Step 1/3: Deriving key & encrypting database...');
     try {
       await new Promise(r => setTimeout(r, 50));
@@ -215,12 +215,12 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
       setBackupStatusMsg(`❌ Backup failed: ${err.message}`);
       Alert.alert('Backup failed', err.message);
     }
-    finally { setLoading(false); }
+    finally { setActionLoading(null); }
   }
 
   async function handleCloudRestore() {
     if (!restorePass) { Alert.alert('Passcode Required', 'Please enter your backup passcode.'); return; }
-    setLoading(true);
+    setActionLoading('restore');
     setRestoreStatusMsg('☁️ Step 1/3: Downloading encrypted payload from account...');
     try {
       const res = await fetch(`${serverUrl}/api/backup`, {
@@ -255,7 +255,7 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
       setRestoreStatusMsg(`❌ Restore failed: ${isPassErr ? 'Wrong passcode!' : err.message}`);
       Alert.alert('Restore failed', isPassErr ? 'Wrong passcode! Please check your backup password.' : err.message);
     }
-    finally { setLoading(false); }
+    finally { setActionLoading(null); }
   }
 
   async function handleExportLocalBackup() {
@@ -267,7 +267,7 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
       Alert.alert('Error', 'Enter a backup password (at least 4 characters).');
       return;
     }
-    setLoading(true);
+    setActionLoading('export');
     try {
       const pub = await AsyncStorage.getItem('ichat_identity_key_public');
       const priv = await AsyncStorage.getItem('ichat_identity_key_private');
@@ -282,7 +282,7 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
         Alert.alert('Exported', `Backup saved to: ${fileUri}`);
       }
     } catch (err) { Alert.alert('Export failed', err.message); }
-    finally { setLoading(false); }
+    finally { setActionLoading(null); }
   }
 
   async function handleImportLocalBackup() {
@@ -291,10 +291,10 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
       return;
     }
     if (!restorePass) { Alert.alert('Error', 'Enter your backup password first.'); return; }
-    setLoading(true);
+    setActionLoading('import');
     try {
       const result = await DocumentPicker.getDocumentAsync({ type: '*/*' });
-      if (result.canceled || !result.assets?.length) { setLoading(false); return; }
+      if (result.canceled || !result.assets?.length) { setActionLoading(null); return; }
       const content = await FileSystem.readAsStringAsync(result.assets[0].uri, { encoding: FileSystem.EncodingType.UTF8 });
       const blob = JSON.parse(content);
       const keyBytes = pbkdf2Sync(restorePass, user.email, 2000, 32);
@@ -307,14 +307,14 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
       setRestorePass('');
       Alert.alert('Success', 'Chat history and keys restored!');
     } catch (err) { Alert.alert('Import failed', 'Wrong password or invalid file.'); }
-    finally { setLoading(false); }
+    finally { setActionLoading(null); }
   }
 
   async function handleLogoutAllDevices() {
     Alert.alert('Logout from All Devices', 'This signs you out from ALL devices. You will need to log in again.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Logout All', style: 'destructive', onPress: async () => {
-        setLoading(true);
+        setActionLoading('logout-all');
         try {
           const res = await fetch(`${serverUrl}/api/auth/logout-all-devices?action=logout-all-devices`, {
             method: 'POST',
@@ -331,7 +331,7 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
         } catch (err) {
           Alert.alert('Error', err.message);
         } finally {
-          setLoading(false);
+          setActionLoading(null);
         }
       }}
     ]);
@@ -341,7 +341,7 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
     Alert.alert('Danger Zone', 'Permanently delete your account? This cannot be undone.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: async () => {
-        setLoading(true);
+        setActionLoading('delete-account');
         try {
           const res = await fetch(`${serverUrl}/api/auth/delete-account`, {
             method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
@@ -355,7 +355,7 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
           }
           onLogout();
         } catch (err) { Alert.alert('Error', err.message); }
-        finally { setLoading(false); }
+        finally { setActionLoading(null); }
       }}
     ]);
   }
