@@ -10,6 +10,37 @@ Notifications.setNotificationHandler({
   }),
 });
 
+// Configure interactive notification categories (Mark as Read & Inline Reply)
+export async function setupNotificationCategories() {
+  try {
+    if (Platform.OS === 'web') return;
+
+    await Notifications.setNotificationCategoryAsync('message', [
+      {
+        identifier: 'MARK_READ',
+        buttonTitle: '✓ Mark as Read',
+        options: {
+          isAuthenticationRequired: false,
+          isDestructive: false,
+        },
+      },
+      {
+        identifier: 'REPLY',
+        buttonTitle: '💬 Reply',
+        textInput: {
+          submitButtonTitle: 'Send',
+          placeholder: 'Type a quick reply...',
+        },
+        options: {
+          isAuthenticationRequired: false,
+        },
+      },
+    ]);
+  } catch (err) {
+    console.warn('[NOTIFICATIONS CATEGORY ERROR]', err);
+  }
+}
+
 export async function registerForPushNotificationsAsync() {
   try {
     if (Platform.OS === 'web') {
@@ -18,6 +49,8 @@ export async function registerForPushNotificationsAsync() {
       }
       return true;
     }
+
+    await setupNotificationCategories();
 
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
@@ -58,6 +91,7 @@ export async function presentLocalNotification({ title, body, data = {} }) {
           title,
           body,
           sound: true,
+          categoryIdentifier: 'message', // Enables Mark as Read & Reply interactive buttons
           data,
         },
         trigger: null, // Display immediately

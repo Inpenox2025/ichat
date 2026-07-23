@@ -18,6 +18,7 @@ import GroupDetailsModal from './src/screens/GroupDetailsModal';
 // Import Services
 import { connectWebSocket, disconnectWebSocket, sendSocketMessage, addSocketListener } from './src/services/websocket';
 import { decryptAsymmetric, decryptSymmetric, encryptAsymmetric, encryptSymmetric, decodeBase64, encodeBase64, decodeUTF8, encodeUTF8, nacl } from './src/services/crypto';
+import * as Notifications from 'expo-notifications';
 import { registerForPushNotificationsAsync, presentLocalNotification } from './src/services/notifications';
 
 const Stack = createNativeStackNavigator();
@@ -163,6 +164,35 @@ export default function App() {
       }
     }
     loadInitialData();
+  }, []);
+
+  // Notification Interactive Action Listener (Mark as Read & Inline Quick Reply)
+  useEffect(() => {
+    const subscription = Notifications.addNotificationResponseReceivedListener(async (response) => {
+      try {
+        const { actionIdentifier, userText, notification } = response;
+        const data = notification?.request?.content?.data;
+        if (!data) return;
+
+        const partner = data.username || data.groupId || data.sender;
+
+        if (actionIdentifier === 'MARK_READ') {
+          if (partner) {
+            setChats(prev => prev.map(c => c.username === partner ? { ...c, unreadCount: 0 } : c));
+            setGroups(prev => prev.map(g => g.id === partner ? { ...g, unreadCount: 0 } : g));
+            sendSocketMessage({ type: 'ack-read', senderOfMessage: partner });
+          }
+        } else if (actionIdentifier === 'REPLY' && userText) {
+          if (partner) {
+            handleSendMessage(partner, userText, null, !!data.groupId);
+          }
+        }
+      } catch (e) {
+        console.error('[NOTIF INTERACTIVE ACTION ERROR]', e);
+      }
+    });
+
+    return () => subscription.remove();
   }, []);
 
   // Automatic Daily Backup Scheduler (runs every 24h when schedule === 'daily')
