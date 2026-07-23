@@ -99,6 +99,69 @@
           </button>
           <p><i data-feather="lock"></i> Keys generated locally on your device</p>
         </div> -->
+        <div class="auth-legal-footer" style="margin-top: 18px; text-align: center;">
+          <p style="color: #94a3b8; font-size: 12px; margin: 0;">
+            By continuing, you agree to iChat's <a href="#" id="openLegalModal" style="color: #00f2fe; text-decoration: underline; font-weight: 600;">Terms of Service & Privacy Policy</a>.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── LEGAL & PRIVACY MODAL ── -->
+    <div id="legalModalOverlay" class="modal-overlay hidden">
+      <div class="modal-card legal-modal-card">
+        <div class="modal-header">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <i data-feather="shield" style="color: #00f2fe;"></i>
+            <div>
+              <h3 style="margin: 0; color: #00f2fe; font-size: 16px;">Legal & Security Hub</h3>
+              <p style="margin: 0; color: #94a3b8; font-size: 11px;">iChat v1.0.0 • E2EE Architecture</p>
+            </div>
+          </div>
+          <button type="button" class="btn-icon" id="btnCloseLegalModal"><i data-feather="x"></i></button>
+        </div>
+        
+        <div class="legal-tab-bar" style="display: flex; gap: 8px; padding: 12px 20px 0 20px; background: rgba(15,23,42,0.8); border-bottom: 1px solid rgba(255,255,255,0.08);">
+          <button type="button" class="legal-tab-btn active" data-tab="legalTerms" style="flex: 1; padding: 8px; border-radius: 8px; background: rgba(0,242,254,0.15); border: 1px solid #00f2fe; color: #00f2fe; font-weight: 700; font-size: 12px; cursor: pointer;">📜 Terms</button>
+          <button type="button" class="legal-tab-btn" data-tab="legalPrivacy" style="flex: 1; padding: 8px; border-radius: 8px; background: transparent; border: 1px solid transparent; color: #94a3b8; font-weight: 700; font-size: 12px; cursor: pointer;">🔒 Privacy</button>
+          <button type="button" class="legal-tab-btn" data-tab="legalAbout" style="flex: 1; padding: 8px; border-radius: 8px; background: transparent; border: 1px solid transparent; color: #94a3b8; font-weight: 700; font-size: 12px; cursor: pointer;">ℹ️ About</button>
+        </div>
+
+        <div class="modal-body legal-modal-body" style="padding: 20px; max-height: 380px; overflow-y: auto;">
+          <div id="legalTerms" class="legal-tab-content">
+            <div style="background: rgba(0,242,254,0.06); padding: 12px; border-radius: 12px; border: 1px solid rgba(0,242,254,0.2); margin-bottom: 16px;">
+              <strong style="color: #00f2fe; font-size: 12px;">⚡ Acceptance Notice:</strong>
+              <p style="color: #cbd5e1; font-size: 11px; margin: 4px 0 0 0; line-height: 16px;">By registering, logging in, or continuing to use iChat, you explicitly consent to and agree to be bound by these Terms of Service and Privacy Policy.</p>
+            </div>
+            <h4 style="color: #fff; margin: 0 0 4px 0; font-size: 14px;">1. Acceptable Use</h4>
+            <p style="color: #94a3b8; font-size: 12px; line-height: 18px; margin-bottom: 14px;">You agree not to use iChat for unlawful activities, harassment, malware distribution, or spamming. Violation of service integrity may result in immediate device revocation.</p>
+            <h4 style="color: #fff; margin: 0 0 4px 0; font-size: 14px;">2. Passcode & Key Responsibility</h4>
+            <p style="color: #94a3b8; font-size: 12px; line-height: 18px; margin-bottom: 14px;">Because iChat operates under zero-knowledge encryption, you are solely responsible for remembering your Cloud Backup Passcode. We cannot reset your backup password.</p>
+            <h4 style="color: #fff; margin: 0 0 4px 0; font-size: 14px;">3. Availability & Service Scope</h4>
+            <p style="color: #94a3b8; font-size: 12px; line-height: 18px; margin: 0;">iChat is provided "as is" with high-availability serverless infrastructure. We reserve the right to enforce rate limits and session limits to maintain platform security.</p>
+          </div>
+
+          <div id="legalPrivacy" class="legal-tab-content" style="display: none;">
+            <h4 style="color: #fff; margin: 0 0 4px 0; font-size: 14px;">1. End-to-End Encryption (E2EE)</h4>
+            <p style="color: #94a3b8; font-size: 12px; line-height: 18px; margin-bottom: 14px;">Messages and attachments are encrypted client-side using TweetNaCl (Curve25519, XSalsa20-Poly1305). Decryption keys reside exclusively on authorized devices.</p>
+            <h4 style="color: #fff; margin: 0 0 4px 0; font-size: 14px;">2. Zero Data Harvesting</h4>
+            <p style="color: #94a3b8; font-size: 12px; line-height: 18px; margin-bottom: 14px;">We do not track user behavior, analyze message metadata, sell user data, or display targeted advertisements.</p>
+            <h4 style="color: #fff; margin: 0 0 4px 0; font-size: 14px;">3. Session Control & Purging</h4>
+            <p style="color: #94a3b8; font-size: 12px; line-height: 18px; margin: 0;">Accounts enforce a maximum 3-device limit. Users can wipe local history or revoke all remote sessions instantly with 1 tap.</p>
+          </div>
+
+          <div id="legalAbout" class="legal-tab-content" style="display: none;">
+            <div style="text-align: center; margin-bottom: 16px;">
+              <h3 style="color: #fff; margin: 0 0 4px 0;">ichat</h3>
+              <p style="color: #00f2fe; font-size: 12px; font-weight: 700; margin: 0;">Version 1.0.0 (Production Build)</p>
+            </div>
+            <p style="color: #cbd5e1; font-size: 12px; line-height: 18px; margin: 0;">Built on zero-trust mathematical principles, iChat provides instant, private, and resilient communication across mobile, web, and desktop platforms.</p>
+          </div>
+        </div>
+
+        <div class="modal-footer" style="padding: 16px; border-top: 1px solid rgba(255,255,255,0.1);">
+          <button type="button" class="btn btn-primary btn-block" id="btnAgreeLegal">I Agree & Understand ✓</button>
+        </div>
       </div>
     </div>
 

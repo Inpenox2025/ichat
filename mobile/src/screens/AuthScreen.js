@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Ionicons } from '@expo/vector-icons';
 import { generateIdentityKeys } from '../services/crypto';
 
 export default function AuthScreen({ onAuthSuccess }) {
@@ -13,6 +14,8 @@ export default function AuthScreen({ onAuthSuccess }) {
   const [loading, setLoading] = useState(false);
   const [deviceId, setDeviceId] = useState('');
   const [conflictDevices, setConflictDevices] = useState([]);
+  const [showPrivacyModal, setShowPrivacyModal] = useState(false);
+  const [privacyTab, setPrivacyTab] = useState('terms'); // 'terms', 'privacy', 'about'
 
   // E2EE credentials cached during auth
   const [localKeys, setLocalKeys] = useState(null);
@@ -218,6 +221,19 @@ export default function AuthScreen({ onAuthSuccess }) {
               <TouchableOpacity style={styles.button} onPress={handleSendOtp} disabled={loading}>
                 {loading ? <ActivityIndicator color="#0c101a" /> : <Text style={styles.buttonText}>Send Code →</Text>}
               </TouchableOpacity>
+
+              <View style={{ marginTop: 14, alignItems: 'center' }}>
+                <Text style={{ color: '#64748b', fontSize: 11, textAlign: 'center', lineHeight: 16 }}>
+                  By continuing, you agree to iChat's{' '}
+                  <Text style={{ color: '#00f2fe', fontWeight: '700', textDecorationLine: 'underline' }} onPress={() => { setPrivacyTab('terms'); setShowPrivacyModal(true); }}>
+                    Terms of Service
+                  </Text>
+                  {' & '}
+                  <Text style={{ color: '#00f2fe', fontWeight: '700', textDecorationLine: 'underline' }} onPress={() => { setPrivacyTab('privacy'); setShowPrivacyModal(true); }}>
+                    Privacy Policy
+                  </Text>.
+                </Text>
+              </View>
             </View>
           )}
 
@@ -243,6 +259,19 @@ export default function AuthScreen({ onAuthSuccess }) {
               <TouchableOpacity style={styles.button} onPress={() => handleVerifyOtp()} disabled={loading}>
                 {loading ? <ActivityIndicator color="#0c101a" /> : <Text style={styles.buttonText}>Verify & Login ✓</Text>}
               </TouchableOpacity>
+
+              <View style={{ marginTop: 14, alignItems: 'center' }}>
+                <Text style={{ color: '#64748b', fontSize: 11, textAlign: 'center', lineHeight: 16 }}>
+                  By verifying code, you agree to our{' '}
+                  <Text style={{ color: '#00f2fe', fontWeight: '700', textDecorationLine: 'underline' }} onPress={() => { setPrivacyTab('terms'); setShowPrivacyModal(true); }}>
+                    Terms
+                  </Text>
+                  {' & '}
+                  <Text style={{ color: '#00f2fe', fontWeight: '700', textDecorationLine: 'underline' }} onPress={() => { setPrivacyTab('privacy'); setShowPrivacyModal(true); }}>
+                    Privacy Policy
+                  </Text>.
+                </Text>
+              </View>
             </View>
           )}
 
@@ -304,6 +333,179 @@ export default function AuthScreen({ onAuthSuccess }) {
             </View>
           )}
         </View>
+
+        {/* ── SMALL TEXT LINK BELOW LOGIN CARD ── */}
+        <TouchableOpacity 
+          style={{ marginTop: 20, alignItems: 'center', paddingVertical: 8 }}
+          onPress={() => { setPrivacyTab('terms'); setShowPrivacyModal(true); }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Ionicons name="shield-checkmark" size={14} color="#00f2fe" />
+            <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: '600', textDecorationLine: 'underline' }}>
+              Terms of Service, Privacy Policy & About iChat
+            </Text>
+          </View>
+        </TouchableOpacity>
+
+        {/* ── TABBED PRIVACY POLICY, TERMS & ABOUT MODAL POPUP ── */}
+        <Modal visible={showPrivacyModal} transparent animationType="slide" onRequestClose={() => setShowPrivacyModal(false)}>
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', padding: 16 }}>
+            <View style={{ width: '100%', maxWidth: 460, maxHeight: '88%', backgroundColor: '#0f172a', borderRadius: 24, borderWidth: 1, borderColor: 'rgba(0,242,254,0.3)', overflow: 'hidden' }}>
+              
+              {/* Modal Header */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.1)', backgroundColor: 'rgba(0,242,254,0.05)' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(0,242,254,0.15)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#00f2fe' }}>
+                    <Ionicons name="shield-checkmark" size={20} color="#00f2fe" />
+                  </View>
+                  <View>
+                    <Text style={{ color: '#00f2fe', fontWeight: '900', fontSize: 16 }}>Legal & Security Hub</Text>
+                    <Text style={{ color: '#94a3b8', fontSize: 11 }}>iChat v1.0.0 • Zero-Knowledge E2EE</Text>
+                  </View>
+                </View>
+                <TouchableOpacity onPress={() => setShowPrivacyModal(false)} style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }}>
+                  <Ionicons name="close" size={18} color="#fff" />
+                </TouchableOpacity>
+              </View>
+
+              {/* 3-Tab Navigator Bar */}
+              <View style={{ flexDirection: 'row', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 6, gap: 8, backgroundColor: 'rgba(15,23,42,0.8)', borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.08)' }}>
+                <TouchableOpacity
+                  style={{ flex: 1, paddingVertical: 8, borderRadius: 10, alignItems: 'center', backgroundColor: privacyTab === 'terms' ? 'rgba(0,242,254,0.18)' : 'transparent', borderWidth: 1, borderColor: privacyTab === 'terms' ? '#00f2fe' : 'transparent' }}
+                  onPress={() => setPrivacyTab('terms')}
+                >
+                  <Text style={{ color: privacyTab === 'terms' ? '#00f2fe' : '#94a3b8', fontSize: 12, fontWeight: '700' }}>📜 Terms</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={{ flex: 1, paddingVertical: 8, borderRadius: 10, alignItems: 'center', backgroundColor: privacyTab === 'privacy' ? 'rgba(0,242,254,0.18)' : 'transparent', borderWidth: 1, borderColor: privacyTab === 'privacy' ? '#00f2fe' : 'transparent' }}
+                  onPress={() => setPrivacyTab('privacy')}
+                >
+                  <Text style={{ color: privacyTab === 'privacy' ? '#00f2fe' : '#94a3b8', fontSize: 12, fontWeight: '700' }}>🔒 Privacy</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={{ flex: 1, paddingVertical: 8, borderRadius: 10, alignItems: 'center', backgroundColor: privacyTab === 'about' ? 'rgba(0,242,254,0.18)' : 'transparent', borderWidth: 1, borderColor: privacyTab === 'about' ? '#00f2fe' : 'transparent' }}
+                  onPress={() => setPrivacyTab('about')}
+                >
+                  <Text style={{ color: privacyTab === 'about' ? '#00f2fe' : '#94a3b8', fontSize: 12, fontWeight: '700' }}>ℹ️ About</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Tab 1: Terms of Service */}
+              {privacyTab === 'terms' && (
+                <ScrollView style={{ padding: 20 }}>
+                  <View style={{ marginBottom: 16, padding: 12, backgroundColor: 'rgba(0,242,254,0.06)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(0,242,254,0.2)' }}>
+                    <Text style={{ color: '#00f2fe', fontWeight: '800', fontSize: 12, marginBottom: 2 }}>⚡ Acceptance Notice</Text>
+                    <Text style={{ color: '#cbd5e1', fontSize: 11, lineHeight: 16 }}>
+                      By registering, logging in, or continuing to use iChat, you explicitly consent to and agree to be bound by these Terms of Service and Privacy Policy.
+                    </Text>
+                  </View>
+
+                  <View style={{ marginBottom: 16 }}>
+                    <Text style={{ color: '#fff', fontWeight: '800', fontSize: 14, marginBottom: 4 }}>1. Acceptable Use</Text>
+                    <Text style={{ color: '#94a3b8', fontSize: 12, lineHeight: 18 }}>
+                      You agree not to use iChat for unlawful activities, harassment, malware distribution, or spamming. Violation of service integrity may result in immediate device revocation.
+                    </Text>
+                  </View>
+
+                  <View style={{ marginBottom: 16 }}>
+                    <Text style={{ color: '#fff', fontWeight: '800', fontSize: 14, marginBottom: 4 }}>2. Passcode & Key Responsibility</Text>
+                    <Text style={{ color: '#94a3b8', fontSize: 12, lineHeight: 18 }}>
+                      Because iChat operates under zero-knowledge encryption, you are solely responsible for remembering your Cloud Backup Passcode. We cannot reset your backup password.
+                    </Text>
+                  </View>
+
+                  <View style={{ marginBottom: 16 }}>
+                    <Text style={{ color: '#fff', fontWeight: '800', fontSize: 14, marginBottom: 4 }}>3. Availability & Service Scope</Text>
+                    <Text style={{ color: '#94a3b8', fontSize: 12, lineHeight: 18 }}>
+                      iChat is provided "as is" with high-availability serverless infrastructure. We reserve the right to enforce rate limits and session limits to maintain platform security.
+                    </Text>
+                  </View>
+                </ScrollView>
+              )}
+
+              {/* Tab 2: Privacy Policy */}
+              {privacyTab === 'privacy' && (
+                <ScrollView style={{ padding: 20 }}>
+                  <View style={{ marginBottom: 16 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                      <Ionicons name="key" size={16} color="#00f2fe" />
+                      <Text style={{ color: '#fff', fontWeight: '800', fontSize: 14 }}>1. End-to-End Encryption (E2EE)</Text>
+                    </View>
+                    <Text style={{ color: '#94a3b8', fontSize: 12, lineHeight: 18 }}>
+                      Messages and attachments are encrypted client-side using TweetNaCl (Curve25519, XSalsa20-Poly1305). Decryption keys reside exclusively on authorized devices.
+                    </Text>
+                  </View>
+
+                  <View style={{ marginBottom: 16 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                      <Ionicons name="eye-off" size={16} color="#00f2fe" />
+                      <Text style={{ color: '#fff', fontWeight: '800', fontSize: 14 }}>2. Zero Data Harvesting</Text>
+                    </View>
+                    <Text style={{ color: '#94a3b8', fontSize: 12, lineHeight: 18 }}>
+                      We do not track user behavior, analyze message metadata, sell user data, or display targeted advertisements.
+                    </Text>
+                  </View>
+
+                  <View style={{ marginBottom: 16 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                      <Ionicons name="shield" size={16} color="#00f2fe" />
+                      <Text style={{ color: '#fff', fontWeight: '800', fontSize: 14 }}>3. Session Control & Purging</Text>
+                    </View>
+                    <Text style={{ color: '#94a3b8', fontSize: 12, lineHeight: 18 }}>
+                      Accounts enforce a maximum 3-device limit. Users can wipe local history or revoke all remote sessions instantly with 1 tap.
+                    </Text>
+                  </View>
+                </ScrollView>
+              )}
+
+              {/* Tab 3: About iChat */}
+              {privacyTab === 'about' && (
+                <ScrollView style={{ padding: 20 }}>
+                  <View style={{ alignItems: 'center', marginBottom: 16 }}>
+                    <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: 'rgba(0,242,254,0.12)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#00f2fe', marginBottom: 8 }}>
+                      <Ionicons name="chatbubbles" size={24} color="#00f2fe" />
+                    </View>
+                    <Text style={{ color: '#fff', fontWeight: '900', fontSize: 18 }}>ichat</Text>
+                    <Text style={{ color: '#00f2fe', fontSize: 11, fontWeight: '700' }}>Version 1.0.0 (Production Build)</Text>
+                  </View>
+
+                  <View style={{ padding: 14, backgroundColor: 'rgba(0,242,254,0.06)', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(0,242,254,0.2)', marginBottom: 16 }}>
+                    <Text style={{ color: '#00f2fe', fontWeight: '800', fontSize: 12, marginBottom: 4 }}>💡 Core Philosophy</Text>
+                    <Text style={{ color: '#cbd5e1', fontSize: 12, lineHeight: 18 }}>
+                      Built on zero-trust mathematical principles, iChat provides instant, private, and resilient communication across mobile, web, and desktop platforms.
+                    </Text>
+                  </View>
+
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.08)' }}>
+                    <Text style={{ color: '#94a3b8', fontSize: 12 }}>Cryptography Primitives</Text>
+                    <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>Curve25519 / XSalsa20</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.08)' }}>
+                    <Text style={{ color: '#94a3b8', fontSize: 12 }}>Key Derivation</Text>
+                    <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>PBKDF2-SHA256 (2k iter)</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8 }}>
+                    <Text style={{ color: '#94a3b8', fontSize: 12 }}>Max Devices</Text>
+                    <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>3 Active Sessions</Text>
+                  </View>
+                </ScrollView>
+              )}
+
+              {/* Footer Close Button */}
+              <View style={{ padding: 16, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)', backgroundColor: 'rgba(15,23,42,0.95)' }}>
+                <TouchableOpacity
+                  style={{ backgroundColor: '#00f2fe', paddingVertical: 12, borderRadius: 12, alignItems: 'center' }}
+                  onPress={() => setShowPrivacyModal(false)}
+                >
+                  <Text style={{ color: '#0c101a', fontWeight: '800', fontSize: 14 }}>I Agree & Understand ✓</Text>
+                </TouchableOpacity>
+              </View>
+
+            </View>
+          </View>
+        </Modal>
       </ScrollView>
     </SafeAreaView>
   );

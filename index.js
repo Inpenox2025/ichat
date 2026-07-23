@@ -117,6 +117,50 @@ function closeConfirmModal() {
   pendingConfirmCallback = null;
 }
 
+/* ── LEGAL & PRIVACY MODAL CONTROLLER (Desktop Web) ── */
+document.addEventListener('DOMContentLoaded', () => {
+  const openLegalBtn = document.getElementById('openLegalModal');
+  const closeLegalBtn = document.getElementById('btnCloseLegalModal');
+  const agreeLegalBtn = document.getElementById('btnAgreeLegal');
+  const legalOverlay = document.getElementById('legalModalOverlay');
+  const tabBtns = document.querySelectorAll('.legal-tab-btn');
+  const tabContents = document.querySelectorAll('.legal-tab-content');
+
+  function openLegalModal() {
+    if (legalOverlay) legalOverlay.classList.remove('hidden');
+  }
+
+  function closeLegalModal() {
+    if (legalOverlay) legalOverlay.classList.add('hidden');
+  }
+
+  if (openLegalBtn) openLegalBtn.addEventListener('click', (e) => { e.preventDefault(); openLegalModal(); });
+  if (closeLegalBtn) closeLegalBtn.addEventListener('click', closeLegalModal);
+  if (agreeLegalBtn) agreeLegalBtn.addEventListener('click', closeLegalModal);
+
+  tabBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const targetTab = btn.getAttribute('data-tab');
+      tabBtns.forEach(b => {
+        b.style.background = 'transparent';
+        b.style.border = '1px solid transparent';
+        b.style.color = '#94a3b8';
+      });
+      btn.style.background = 'rgba(0,242,254,0.15)';
+      btn.style.border = '1px solid #00f2fe';
+      btn.style.color = '#00f2fe';
+
+      tabContents.forEach(c => {
+        if (c.id === targetTab) {
+          c.style.display = 'block';
+        } else {
+          c.style.display = 'none';
+        }
+      });
+    });
+  });
+});
+
 
 /* ═══════════ HISTORY API & BACK GESTURE NAVIGATION ═══════════ */
 function initHistoryNavigation() {
