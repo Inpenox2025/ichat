@@ -1,14 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, Text, View, FlatList, TextInput, TouchableOpacity, Image, Alert, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
-import { decodeBase64, encodeBase64, decryptSymmetric, encryptSymmetric, nacl } from '../services/crypto';
+import { decodeBase64, encodeBase64, nacl } from '../services/crypto';
 
-export default function ChatScreen({ route, navigation, messages, onSendMessage, onSendReadReceipt, typingStatus, activeCallPartner, serverUrl, token, currentUsername }) {
-  const { username } = route.params;
+export default function ChatScreen({ route, navigation, messages, onSendMessage, onSendReadReceipt, typingStatus, serverUrl, token, currentUsername, onOpenGroupDetails }) {
+  const { username, isGroup, group } = route.params || {};
   const [text, setText] = useState('');
   const [typing, setTyping] = useState(false);
   const [mediaUploading, setMediaUploading] = useState(false);
@@ -16,8 +15,11 @@ export default function ChatScreen({ route, navigation, messages, onSendMessage,
   const typingTimeoutRef = useRef(null);
   const flatListRef = useRef(null);
 
-  // Filter messages for this chat partner
-  const chatMessages = messages.filter(m => m.chatPartner === username);
+  const activeTargetId = isGroup ? (group?.id || username) : username;
+  const displayTitle = isGroup ? (group?.name || 'Group Chat') : `@${username}`;
+
+  // Filter messages for this chat partner/group
+  const chatMessages = messages.filter(m => m.chatPartner === activeTargetId);
 
   // Mark all unread messages as read
   useEffect(() => {
@@ -32,17 +34,18 @@ export default function ChatScreen({ route, navigation, messages, onSendMessage,
   function handleTextChange(val) {
     setText(val);
 
-    // Send typing notification
-    if (!typing) {
-      setTyping(true);
-      onSendMessage({ type: 'typing', recipient: username, status: true });
-    }
+    if (!isGroup) {
+      if (!typing) {
+        setTyping(true);
+        onSendMessage({ type: 'typing', recipient: username, status: true });
+      }
 
-    clearTimeout(typingTimeoutRef.current);
-    typingTimeoutRef.current = setTimeout(() => {
-      setTyping(false);
-      onSendMessage({ type: 'typing', recipient: username, status: false });
-    }, 2000);
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = setTimeout(() => {
+        setTyping(false);
+        onSendMessage({ type: 'typing', recipient: username, status: false });
+      }, 2000);
+    }
   }
 
   // Trigger text message send
@@ -50,18 +53,28 @@ export default function ChatScreen({ route, navigation, messages, onSendMessage,
     const cleanText = text.trim();
     if (!cleanText) return;
 
-    onSendMessage({
-      type: 'text',
-      recipient: username,
-      body: cleanText
-    });
+    if (isGroup) {
+      onSendMessage({
+        type: 'group_message',
+        group,
+        body: cleanText
+      });
+    } else {
+      onSendMessage({
+        type: 'text',
+        recipient: username,
+        body: cleanText
+      });
+    }
     
     setText('');
     
     // Clear typing indicator
-    clearTimeout(typingTimeoutRef.current);
-    setTyping(false);
-    onSendMessage({ type: 'typing', recipient: username, status: false });
+    if (!isGroup) {
+      clearTimeout(typingTimeoutRef.current);
+      setTyping(false);
+      onSendMessage({ type: 'typing', recipient: username, status: false });
+    }
   }
 
   // Pick Media image
@@ -98,23 +111,18 @@ export default function ChatScreen({ route, navigation, messages, onSendMessage,
   async function uploadMediaFile(uri, filename, mimeType) {
     setMediaUploading(true);
     try {
-      // 1. Read binary as base64 string
       const fileBase64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
       const fileBytes = decodeBase64(fileBase64);
 
-      // 2. Generate E2EE media keys
       const mediaKey = nacl.randomBytes(32);
       const mediaNonce = nacl.randomBytes(24);
 
-      // 3. Symmetrically encrypt file
       const encryptedBytes = nacl.secretbox(fileBytes, mediaNonce, mediaKey);
       const encryptedBase64 = encodeBase64(encryptedBytes);
 
-      // 4. Save encrypted block to temporary local folder
       const tempPath = `${FileSystem.cacheDirectory}${filename}.enc`;
       await FileSystem.writeAsStringAsync(tempPath, encryptedBase64, { encoding: FileSystem.EncodingType.Base64 });
 
-      // 5. Upload temporary encrypted file to server
       const uploadResult = await FileSystem.uploadAsync(
         `${serverUrl}/api/upload`,
         tempPath,
@@ -126,31 +134,39 @@ export default function ChatScreen({ route, navigation, messages, onSendMessage,
         }
       );
 
-      // Delete temp encrypted file
       await FileSystem.deleteAsync(tempPath, { idempotent: true });
 
       const response = JSON.parse(uploadResult.body);
       if (!response.success) throw new Error(response.error);
 
-      // Save to local cache so we don't have to download it again
       const cachePath = `${FileSystem.documentDirectory}${response.filename}`;
       await FileSystem.copyAsync({ from: uri, to: cachePath });
       setMediaCache(prev => ({ ...prev, [response.url]: cachePath }));
 
-      // Append media file to outbox message
-      onSendMessage({
-        type: 'media',
-        recipient: username,
-        body: null,
-        media: {
-          url: response.url,
-          filename,
-          type: mimeType,
-          size: response.size,
-          encryptedKeyBase64: encodeBase64(mediaKey),
-          mediaNonceBase64: encodeBase64(mediaNonce)
-        }
-      });
+      const mediaData = {
+        url: response.url,
+        filename,
+        type: mimeType,
+        size: response.size,
+        encryptedKeyBase64: encodeBase64(mediaKey),
+        mediaNonceBase64: encodeBase64(mediaNonce)
+      };
+
+      if (isGroup) {
+        onSendMessage({
+          type: 'group_message',
+          group,
+          body: null,
+          media: mediaData
+        });
+      } else {
+        onSendMessage({
+          type: 'media',
+          recipient: username,
+          body: null,
+          media: mediaData
+        });
+      }
 
     } catch (err) {
       console.error('[MOBILE MEDIA UPLOAD]', err);
@@ -162,12 +178,10 @@ export default function ChatScreen({ route, navigation, messages, onSendMessage,
 
   // Secure Decrypt downloaded attachments
   async function decryptAttachment(msg) {
-    const { url, filename, type } = msg.media;
+    const { url, filename } = msg.media;
     
-    // 1. Check in-memory local caches
     if (mediaCache[url]) return mediaCache[url];
 
-    // Check if file is already stored in app system
     const localPath = `${FileSystem.documentDirectory}${filename}`;
     const fileInfo = await FileSystem.getInfoAsync(localPath);
     if (fileInfo.exists) {
@@ -175,33 +189,26 @@ export default function ChatScreen({ route, navigation, messages, onSendMessage,
       return localPath;
     }
 
-    // 2. Need E2EE keys to decrypt
     if (!msg.media.encryptedKey || !msg.media.mediaNonce) return null;
 
     try {
       const mediaKey = decodeBase64(msg.media.encryptedKey);
       const mediaNonce = decodeBase64(msg.media.mediaNonce);
 
-      // 3. Download encrypted ciphertext from server to local cache path
       const encPath = `${FileSystem.cacheDirectory}${filename}.enc`;
       await FileSystem.downloadAsync(url, encPath);
 
-      // 4. Read file base64 data
       const encBase64 = await FileSystem.readAsStringAsync(encPath, { encoding: FileSystem.EncodingType.Base64 });
       const encBytes = decodeBase64(encBase64);
 
-      // 5. Decrypt binary bytes
       const decryptedBytes = nacl.secretbox.open(encBytes, mediaNonce, mediaKey);
       if (!decryptedBytes) throw new Error('Decryption mismatch');
 
-      // Delete temporary download
       await FileSystem.deleteAsync(encPath, { idempotent: true });
 
-      // 6. Write decrypted base64 block back to document storage
       const decBase64 = encodeBase64(decryptedBytes);
       await FileSystem.writeAsStringAsync(localPath, decBase64, { encoding: FileSystem.EncodingType.Base64 });
 
-      // Cache mapping path
       setMediaCache(prev => ({ ...prev, [url]: localPath }));
       return localPath;
 
@@ -223,6 +230,11 @@ export default function ChatScreen({ route, navigation, messages, onSendMessage,
       <View style={[styles.msgWrapper, isOutgoing ? styles.outgoingWrapper : styles.incomingWrapper]}>
         <View style={[styles.bubble, isOutgoing ? styles.outgoingBubble : styles.incomingBubble]}>
           
+          {/* Sender Tag for Group Messages */}
+          {isGroup && !isOutgoing && (
+            <Text style={styles.senderTag}>@{item.sender}</Text>
+          )}
+
           {/* Media Attachment card */}
           {item.media && (
             <MediaAttachment msg={item} decryptFn={decryptAttachment} />
@@ -258,22 +270,32 @@ export default function ChatScreen({ route, navigation, messages, onSendMessage,
       behavior={Platform.OS === 'ios' ? 'padding' : null}
       keyboardVerticalOffset={90}
     >
-      {/* Header bar overrides */}
+      {/* Header bar */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
-        <View style={styles.headerUser}>
-          <Text style={styles.headerTitle}>@{username}</Text>
+        
+        <TouchableOpacity 
+          style={styles.headerUser} 
+          onPress={() => isGroup && onOpenGroupDetails && onOpenGroupDetails(group)}
+          disabled={!isGroup}
+        >
+          <Text style={styles.headerTitle}>{displayTitle}</Text>
           {typingStatus ? (
             <Text style={styles.headerTyping}>is typing...</Text>
           ) : (
-            <Text style={styles.headerSubtitle}>Active Secure Room</Text>
+            <Text style={styles.headerSubtitle}>
+              {isGroup ? `${group?.members?.length || 0} Members • Group Info` : 'Active Secure Room'}
+            </Text>
           )}
-        </View>
-        <TouchableOpacity style={styles.callBtn} onPress={handleTriggerCall}>
-          <Ionicons name="call" size={20} color="#00f2fe" />
         </TouchableOpacity>
+
+        {!isGroup && (
+          <TouchableOpacity style={styles.callBtn} onPress={handleTriggerCall}>
+            <Ionicons name="call" size={20} color="#00f2fe" />
+          </TouchableOpacity>
+        )}
       </View>
 
       <FlatList
@@ -440,6 +462,12 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.06)',
     borderBottomLeftRadius: 2,
   },
+  senderTag: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#38bdf8',
+    marginBottom: 4,
+  },
   outgoingText: {
     color: '#0c101a',
     fontSize: 14.5,
@@ -456,16 +484,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 4,
   },
-  metaText: {
-    fontSize: 9,
-    color: 'rgba(0,0,0,0.5)',
-  },
-  incomingBubble: {
-    backgroundColor: '#161c2d',
-  },
-  // Overrides to match meta colors
-  incomingText: { color: '#fff' },
-  // Need custom selector
   metaText: {
     fontSize: 9,
     color: '#718096',

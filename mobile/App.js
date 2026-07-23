@@ -13,6 +13,7 @@ import ChatListScreen from './src/screens/ChatListScreen';
 import ChatScreen from './src/screens/ChatScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import CallScreen from './src/screens/CallScreen';
+import GroupDetailsModal from './src/screens/GroupDetailsModal';
 
 // Import Services
 import { connectWebSocket, disconnectWebSocket, sendSocketMessage, addSocketListener } from './src/services/websocket';
@@ -22,20 +23,41 @@ const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
 // Bottom Tabs Navigator (Chats & Settings)
-function MainTabs({ chats, messages, onSelectChat, onRestoreCompleted, onLogout, serverUrl, token, user, selectedTheme, onThemeChange }) {
+function MainTabs({
+  chats,
+  groups,
+  messages,
+  activeTab,
+  onSwitchTab,
+  onSelectChat,
+  onSelectGroup,
+  onCreateGroup,
+  onDeleteSelectedChats,
+  onDeleteSelectedGroups,
+  onExitSelectedGroups,
+  onAcceptRequest,
+  onDeclineRequest,
+  onRestoreCompleted,
+  onLogout,
+  serverUrl,
+  token,
+  user,
+  selectedTheme,
+  onThemeChange
+}) {
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
         tabBarIcon: ({ color, size }) => {
           let iconName;
-          if (route.name === 'Chats') {
+          if (route.name === 'ChatsTab') {
             iconName = 'chatbubbles-outline';
           } else if (route.name === 'Settings') {
             iconName = 'settings-outline';
           }
           return <Ionicons name={iconName} size={size} color={color} />;
         },
-        tabBarActiveTintColor: '#00f2fe',
+        tabBarActiveTintColor: '#38bdf8',
         tabBarInactiveTintColor: '#718096',
         tabBarStyle: {
           backgroundColor: '#161c2d',
@@ -56,15 +78,26 @@ function MainTabs({ chats, messages, onSelectChat, onRestoreCompleted, onLogout,
         },
       })}
     >
-      <Tab.Screen name="Chats">
+      <Tab.Screen name="ChatsTab" options={{ title: 'Messages' }}>
         {(props) => (
           <ChatListScreen
             {...props}
             chats={chats}
+            groups={groups}
             messages={messages}
+            activeTab={activeTab}
+            onSwitchTab={onSwitchTab}
             onSelectChat={onSelectChat}
+            onSelectGroup={onSelectGroup}
+            onCreateGroup={onCreateGroup}
+            onDeleteSelectedChats={onDeleteSelectedChats}
+            onDeleteSelectedGroups={onDeleteSelectedGroups}
+            onExitSelectedGroups={onExitSelectedGroups}
+            onAcceptRequest={onAcceptRequest}
+            onDeclineRequest={onDeclineRequest}
             serverUrl={serverUrl}
             token={token}
+            currentUsername={user?.username}
           />
         )}
       </Tab.Screen>
@@ -95,19 +128,26 @@ export default function App() {
   const [theme, setTheme] = useState('system');
   const [loading, setLoading] = useState(true);
 
-  // Chat Data State
+  // Chat & Group Data State
   const [chats, setChats] = useState([]);
+  const [groups, setGroups] = useState([]);
   const [messages, setMessages] = useState([]);
   const [outbox, setOutbox] = useState([]);
   const [activePartner, setActivePartner] = useState(null);
+  const [activeGroup, setActiveGroup] = useState(null);
+  const [activeTab, setActiveTab] = useState('home');
+
+  // Group Details Modal State
+  const [groupDetailsGroup, setGroupDetailsGroup] = useState(null);
+  const [showGroupDetailsModal, setShowGroupDetailsModal] = useState(false);
 
   // Real-time Event States
-  const [typingPartner, setTypingPartner] = useState(null); // username that is typing
-  const [callState, setCallState] = useState(null); // { partner, status: 'ringing'|'connected'|'disconnected' }
+  const [typingPartner, setTypingPartner] = useState(null);
+  const [callState, setCallState] = useState(null);
 
   // Refs to avoid stale closures in socket listener
-  const stateRef = useRef({ token, user, serverUrl, chats, messages, outbox, activePartner });
-  stateRef.current = { token, user, serverUrl, chats, messages, outbox, activePartner };
+  const stateRef = useRef({ token, user, serverUrl, chats, groups, messages, outbox, activePartner, activeGroup });
+  stateRef.current = { token, user, serverUrl, chats, groups, messages, outbox, activePartner, activeGroup };
 
   const navigationRef = useRef(null);
 
@@ -119,18 +159,22 @@ export default function App() {
         const savedUser = await AsyncStorage.getItem('ichat_user');
         const savedServer = await AsyncStorage.getItem('ichat_server_url');
         const savedTheme = await AsyncStorage.getItem('ichat_theme') || 'system';
+        const savedTab = await AsyncStorage.getItem('ichat_active_tab') || 'home';
 
         if (savedToken && savedUser && savedServer) {
           setToken(savedToken);
           setUser(JSON.parse(savedUser));
           setServerUrl(savedServer);
+          setActiveTab(savedTab);
           
-          // Load chat database
+          // Load chat & group database
           const savedChats = await AsyncStorage.getItem('ichat_chats');
+          const savedGroups = await AsyncStorage.getItem('ichat_groups');
           const savedMsgs = await AsyncStorage.getItem('ichat_messages');
           const savedOutbox = await AsyncStorage.getItem('ichat_outbox');
 
           if (savedChats) setChats(JSON.parse(savedChats));
+          if (savedGroups) setGroups(JSON.parse(savedGroups));
           if (savedMsgs) setMessages(JSON.parse(savedMsgs));
           if (savedOutbox) setOutbox(JSON.parse(savedOutbox));
         }
@@ -148,27 +192,40 @@ export default function App() {
   useEffect(() => {
     if (!token || !serverUrl) return;
 
-    // Connect
     connectWebSocket(serverUrl, token);
 
-    // Register listener
     const unsubscribe = addSocketListener(async (data) => {
       const current = stateRef.current;
 
-      // 1. Auth Success
       if (data.type === 'auth-success') {
         console.log('[WS Mobile] Authenticated!');
         flushOutboxQueue();
         return;
       }
 
-      // 2. Incoming Encrypted Message
       if (data.type === 'message') {
         await handleIncomingMessage(data);
         return;
       }
 
-      // 3. Typing Indicators
+      if (data.type === 'group_updated') {
+        if (data.group && data.group.id) {
+          setGroups(prev => {
+            const idx = prev.findIndex(g => g.id === data.group.id);
+            let updated;
+            if (idx === -1) {
+              updated = [...prev, data.group];
+            } else {
+              updated = [...prev];
+              updated[idx] = { ...updated[idx], ...data.group };
+            }
+            AsyncStorage.setItem('ichat_groups', JSON.stringify(updated));
+            return updated;
+          });
+        }
+        return;
+      }
+
       if (data.type === 'typing') {
         const { sender, status } = data;
         if (status) {
@@ -179,7 +236,6 @@ export default function App() {
         return;
       }
 
-      // 4. Delivery/Read Receipt Checks
       if (data.type === 'ack') {
         const { messageId, status } = data;
         setMessages(prev => {
@@ -198,11 +254,9 @@ export default function App() {
         return;
       }
 
-      // 5. Incoming Calling signaling invitation
       if (data.type === 'call-offer') {
         const { sender } = data;
         setCallState({ partner: sender, status: 'ringing' });
-        // Navigate call Screen
         navigationRef.current?.navigate('Call', { username: sender, direction: 'incoming' });
         return;
       }
@@ -224,31 +278,28 @@ export default function App() {
     };
   }, [token, serverUrl]);
 
-  // Decode E2EE message packets
+  // Decode E2EE message packets (including Group Messages)
   async function handleIncomingMessage(data) {
     const current = stateRef.current;
-    const { messageId, sender, recipient, key, payload, timestamp, media, isSenderSync } = data;
-    const partner = isSenderSync ? recipient : sender;
+    const { messageId, sender, recipient, key, payload, timestamp, media, isSenderSync, isGroup, groupId, groupName } = data;
+    const partner = isGroup ? groupId : (isSenderSync ? recipient : sender);
 
-    // Check duplicates
     if (current.messages.some(m => m.id === messageId)) return;
 
     try {
       const sqlPayload = JSON.parse(payload);
       
-      // Fetch public keys of sender
       const res = await fetch(`${current.serverUrl}/api/users/keys?username=${sender}`, {
         headers: { 'Authorization': `Bearer ${current.token}` }
       });
       const result = await res.json();
       if (!result.success) throw new Error(result.error);
 
-      // Fetch own private key from local system
       const myPriv = await AsyncStorage.getItem('ichat_identity_key_private');
       const myPrivBytes = decodeBase64(myPriv);
 
       let decryptedBody = '';
-      const allKnownDevices = [...result.recipient_devices, ...result.sender_other_devices];
+      const allKnownDevices = [...(result.recipient_devices || []), ...(result.sender_other_devices || [])];
 
       for (const dev of allKnownDevices) {
         try {
@@ -272,6 +323,7 @@ export default function App() {
         sender,
         body: decryptedBody,
         timestamp,
+        isGroup: !!isGroup,
         media: media ? {
           url: media.url,
           filename: media.filename,
@@ -283,24 +335,44 @@ export default function App() {
         status: 'delivered'
       };
 
-      // Append message
       const updatedMessages = [...current.messages, newMsg];
       setMessages(updatedMessages);
       await AsyncStorage.setItem('ichat_messages', JSON.stringify(updatedMessages));
 
-      // Append chat room
-      const updatedChats = [...current.chats];
-      const chatIdx = updatedChats.findIndex(c => c.username === partner);
-      if (chatIdx === -1) {
-        updatedChats.push({ username: partner, email: '', unreadCount: current.activePartner === partner ? 0 : 1 });
-      } else if (current.activePartner !== partner) {
-        updatedChats[chatIdx].unreadCount = (updatedChats[chatIdx].unreadCount || 0) + 1;
+      if (isGroup) {
+        setGroups(prev => {
+          const idx = prev.findIndex(g => g.id === groupId);
+          let updated = [...prev];
+          if (idx !== -1) {
+            updated[idx] = {
+              ...updated[idx],
+              unreadCount: current.activeGroup?.id === groupId ? 0 : (updated[idx].unreadCount || 0) + 1
+            };
+          } else {
+            updated.push({
+              id: groupId,
+              name: groupName || 'Group',
+              createdBy: sender,
+              members: [sender, current.user.username],
+              unreadCount: 1
+            });
+          }
+          AsyncStorage.setItem('ichat_groups', JSON.stringify(updated));
+          return updated;
+        });
+      } else {
+        const updatedChats = [...current.chats];
+        const chatIdx = updatedChats.findIndex(c => c.username === partner);
+        if (chatIdx === -1) {
+          updatedChats.push({ username: partner, email: '', unreadCount: current.activePartner === partner ? 0 : 1 });
+        } else if (current.activePartner !== partner) {
+          updatedChats[chatIdx].unreadCount = (updatedChats[chatIdx].unreadCount || 0) + 1;
+        }
+        setChats(updatedChats);
+        await AsyncStorage.setItem('ichat_chats', JSON.stringify(updatedChats));
       }
-      setChats(updatedChats);
-      await AsyncStorage.setItem('ichat_chats', JSON.stringify(updatedChats));
 
-      // Delivered receipt ack back to sender (skip self syncs)
-      if (!isSenderSync) {
+      if (!isSenderSync && !isGroup) {
         sendSocketMessage({
           type: 'ack-delivered',
           messageId,
@@ -308,14 +380,12 @@ export default function App() {
         });
       }
 
-      // Read receipt automatic trigger if open
-      if (current.activePartner === partner) {
+      if (!isGroup && current.activePartner === partner) {
         sendSocketMessage({
           type: 'ack-read',
           messageId,
           senderOfMessage: sender
         });
-        // Update local status as read
         newMsg.status = 'read';
         await AsyncStorage.setItem('ichat_messages', JSON.stringify(updatedMessages));
       }
@@ -325,21 +395,18 @@ export default function App() {
     }
   }
 
-  // Flush mobile outbox on socket restore
   async function flushOutboxQueue() {
     const current = stateRef.current;
     if (current.outbox.length === 0) return;
 
-    console.log(`[WS Mobile] Flushing outbox queue of ${current.outbox.length} messages.`);
     const remainingOutbox = [...current.outbox];
-    
     while (remainingOutbox.length > 0) {
       const packet = remainingOutbox[0];
       const sent = sendSocketMessage(packet);
       if (sent) {
         remainingOutbox.shift();
       } else {
-        break; // socket disconnected again
+        break;
       }
     }
 
@@ -347,22 +414,86 @@ export default function App() {
     await AsyncStorage.setItem('ichat_outbox', JSON.stringify(remainingOutbox));
   }
 
-  // Handle message sending flows
+  // Handle Send Message (1-on-1 and Group)
   async function handleSendMessage(actionObj) {
     const current = stateRef.current;
 
-    // Typing statuses signals
     if (actionObj.type === 'typing') {
       sendSocketMessage(actionObj);
       return;
     }
 
-    // Text & Media Dispatch
     const timestamp = new Date().toISOString();
     const messageId = 'msg-' + Math.random().toString(36).substring(2, 15);
-    const { recipient, body, media } = actionObj;
+    const { type, recipient, group, body, media } = actionObj;
 
-    // 1. Fetch public keys of recipient's devices and my other devices
+    if (type === 'group_message' && group) {
+      // Group E2EE Dispatches
+      const sessionKey = nacl.randomBytes(32);
+      const nonce = nacl.randomBytes(24);
+      const content = encryptSymmetric(body || '', sessionKey);
+
+      const myPriv = await AsyncStorage.getItem('ichat_identity_key_private');
+      const myPrivBytes = decodeBase64(myPriv);
+
+      const otherMembers = group.members.filter(m => m !== current.user.username);
+
+      for (const member of otherMembers) {
+        try {
+          const res = await fetch(`${current.serverUrl}/api/users/keys?username=${member}`, {
+            headers: { 'Authorization': `Bearer ${current.token}` }
+          });
+          const result = await res.json();
+          if (!result.success) continue;
+
+          const keysMap = {};
+          for (const dev of (result.recipient_devices || [])) {
+            const devPub = decodeBase64(dev.public_key);
+            keysMap[dev.device_id] = encryptAsymmetric(devPub, myPrivBytes, sessionKey, nonce);
+          }
+
+          const payload = { encryptedBody: content.ciphertext, nonce: content.nonce };
+          const packet = {
+            type: 'message',
+            messageId,
+            recipient: member,
+            isGroup: true,
+            groupId: group.id,
+            groupName: group.name,
+            keys: keysMap,
+            payload: JSON.stringify(payload),
+            timestamp,
+            media
+          };
+
+          sendSocketMessage(packet);
+        } catch (e) {}
+      }
+
+      // Save locally
+      const localMsgObj = {
+        id: messageId,
+        chatPartner: group.id,
+        sender: current.user.username,
+        body,
+        timestamp,
+        isGroup: true,
+        media: media ? {
+          url: media.url,
+          filename: media.filename,
+          type: media.type,
+          size: media.size
+        } : null,
+        status: 'sent'
+      };
+
+      const updatedMessages = [...current.messages, localMsgObj];
+      setMessages(updatedMessages);
+      await AsyncStorage.setItem('ichat_messages', JSON.stringify(updatedMessages));
+      return;
+    }
+
+    // 1-on-1 Message Dispatch
     let recipientKeys, senderOtherKeys;
     try {
       const res = await fetch(`${current.serverUrl}/api/users/keys?username=${recipient}`, {
@@ -373,32 +504,25 @@ export default function App() {
       recipientKeys = result.recipient_devices;
       senderOtherKeys = result.sender_other_devices;
     } catch (err) {
-      Alert.alert('E2EE Failure', 'Failed to acquire security keys.');
       return;
     }
 
-    // 2. Generate E2EE session keys
     const sessionKey = nacl.randomBytes(32);
     const nonce = nacl.randomBytes(24);
-
-    // 3. Encrypt payload
     const content = encryptSymmetric(body || '', sessionKey);
 
-    // 4. Encrypt session key for all recipient/sender devices
     const keysMap = {};
     const myPriv = await AsyncStorage.getItem('ichat_identity_key_private');
     const myPrivBytes = decodeBase64(myPriv);
 
     for (const dev of recipientKeys) {
       const devPub = decodeBase64(dev.public_key);
-      const encKey = encryptAsymmetric(devPub, myPrivBytes, sessionKey, nonce);
-      keysMap[dev.device_id] = encKey;
+      keysMap[dev.device_id] = encryptAsymmetric(devPub, myPrivBytes, sessionKey, nonce);
     }
 
     for (const dev of senderOtherKeys) {
       const devPub = decodeBase64(dev.public_key);
-      const encKey = encryptAsymmetric(devPub, myPrivBytes, sessionKey, nonce);
-      keysMap[dev.device_id] = encKey;
+      keysMap[dev.device_id] = encryptAsymmetric(devPub, myPrivBytes, sessionKey, nonce);
     }
 
     const payload = {
@@ -413,10 +537,9 @@ export default function App() {
       keys: keysMap,
       payload: JSON.stringify(payload),
       timestamp,
-      media // { url, filename, type, size, encryptedKeyBase64, mediaNonceBase64 }
+      media
     };
 
-    // 5. Append locally
     const localMsgObj = {
       id: messageId,
       chatPartner: recipient,
@@ -436,17 +559,140 @@ export default function App() {
     setMessages(updatedMessages);
     await AsyncStorage.setItem('ichat_messages', JSON.stringify(updatedMessages));
 
-    // Send
     const sent = sendSocketMessage(messagePacket);
     if (!sent) {
-      // Buffer to outbox
       const updatedOutbox = [...current.outbox, messagePacket];
       setOutbox(updatedOutbox);
       await AsyncStorage.setItem('ichat_outbox', JSON.stringify(updatedOutbox));
     }
   }
 
-  // Trigger read tick ack
+  // Create Group Handler
+  const handleCreateGroup = (name, selectedUsernames) => {
+    const groupId = 'group-' + Date.now();
+    const allMembers = Array.from(new Set([user.username, ...selectedUsernames]));
+
+    const newGroupObj = {
+      id: groupId,
+      name,
+      createdBy: user.username,
+      members: allMembers,
+      unreadCount: 0
+    };
+
+    setGroups(prev => {
+      const updated = [...prev, newGroupObj];
+      AsyncStorage.setItem('ichat_groups', JSON.stringify(updated));
+      return updated;
+    });
+
+    // Notify all members
+    const updatePacket = {
+      type: 'group_updated',
+      group: newGroupObj
+    };
+
+    allMembers.forEach(m => {
+      if (m !== user.username) {
+        sendSocketMessage({ ...updatePacket, recipient: m });
+      }
+    });
+  };
+
+  // Group Details Actions
+  const handleAddMembersToGroup = (groupId, newMembers) => {
+    setGroups(prev => {
+      const updated = prev.map(g => {
+        if (g.id === groupId) {
+          const combined = Array.from(new Set([...g.members, ...newMembers]));
+          const updatedGroup = { ...g, members: combined };
+          
+          const updatePacket = { type: 'group_updated', group: updatedGroup };
+          combined.forEach(m => {
+            if (m !== user.username) sendSocketMessage({ ...updatePacket, recipient: m });
+          });
+
+          return updatedGroup;
+        }
+        return g;
+      });
+      AsyncStorage.setItem('ichat_groups', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const handleExitGroup = (groupId) => {
+    setGroups(prev => {
+      const targetGroup = prev.find(g => g.id === groupId);
+      if (targetGroup) {
+        const remaining = targetGroup.members.filter(m => m !== user.username);
+        const updatedGroup = { ...targetGroup, members: remaining };
+
+        const updatePacket = { type: 'group_updated', group: updatedGroup };
+        remaining.forEach(m => {
+          sendSocketMessage({ ...updatePacket, recipient: m });
+        });
+      }
+
+      const updated = prev.filter(g => g.id !== groupId);
+      AsyncStorage.setItem('ichat_groups', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const handleDeleteGroup = (groupId) => {
+    setGroups(prev => {
+      const updated = prev.filter(g => g.id !== groupId);
+      AsyncStorage.setItem('ichat_groups', JSON.stringify(updated));
+      return updated;
+    });
+
+    setMessages(prev => {
+      const updated = prev.filter(m => m.chatPartner !== groupId);
+      AsyncStorage.setItem('ichat_messages', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  // Selection Actions
+  const handleDeleteSelectedChats = (selectedUsernames) => {
+    setChats(prev => {
+      const updated = prev.filter(c => !selectedUsernames.includes(c.username));
+      AsyncStorage.setItem('ichat_chats', JSON.stringify(updated));
+      return updated;
+    });
+
+    setMessages(prev => {
+      const updated = prev.filter(m => !selectedUsernames.includes(m.chatPartner));
+      AsyncStorage.setItem('ichat_messages', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const handleDeleteSelectedGroups = (selectedGroupIds) => {
+    selectedGroupIds.forEach(id => handleDeleteGroup(id));
+  };
+
+  const handleExitSelectedGroups = (selectedGroupIds) => {
+    selectedGroupIds.forEach(id => handleExitGroup(id));
+  };
+
+  const handleAcceptRequest = (username) => {
+    setChats(prev => {
+      const updated = prev.map(c => c.username === username ? { ...c, status: 'accepted' } : c);
+      AsyncStorage.setItem('ichat_chats', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const handleDeclineRequest = (username) => {
+    setChats(prev => {
+      const updated = prev.filter(c => c.username !== username);
+      AsyncStorage.setItem('ichat_chats', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
   function handleSendReadReceipt(messageId, senderOfMessage) {
     sendSocketMessage({
       type: 'ack-read',
@@ -466,11 +712,9 @@ export default function App() {
     });
   }
 
-  // Handle select chat and clearing unreads
   async function handleSelectChat(username) {
     setActivePartner(username);
-    
-    // Clear unreads
+    setActiveGroup(null);
     setChats(prev => {
       const updated = prev.map(c => c.username === username ? { ...c, unreadCount: 0 } : c);
       AsyncStorage.setItem('ichat_chats', JSON.stringify(updated));
@@ -478,25 +722,38 @@ export default function App() {
     });
   }
 
-  // Handle Auth Session login
+  async function handleSelectGroup(groupObj) {
+    setActiveGroup(groupObj);
+    setActivePartner(null);
+    setGroups(prev => {
+      const updated = prev.map(g => g.id === groupObj.id ? { ...g, unreadCount: 0 } : g);
+      AsyncStorage.setItem('ichat_groups', JSON.stringify(updated));
+      return updated;
+    });
+  }
+
+  const handleSwitchTab = (tabName) => {
+    setActiveTab(tabName);
+    AsyncStorage.setItem('ichat_active_tab', tabName);
+  };
+
   async function handleAuthSuccess(newToken, newUser, newServer) {
     setToken(newToken);
     setUser(newUser);
     setServerUrl(newServer);
 
-    // Initial setup table pulls
     try {
       await fetch(`${newServer}/api/setup`, { method: 'POST' });
     } catch (e) {}
 
-    // Load initial storage elements
     const savedChats = await AsyncStorage.getItem('ichat_chats');
+    const savedGroups = await AsyncStorage.getItem('ichat_groups');
     const savedMsgs = await AsyncStorage.getItem('ichat_messages');
     if (savedChats) setChats(JSON.parse(savedChats));
+    if (savedGroups) setGroups(JSON.parse(savedGroups));
     if (savedMsgs) setMessages(JSON.parse(savedMsgs));
   }
 
-  // Handle Restore database imports
   function handleRestoreCompleted(restoredChats, restoredMessages) {
     setChats(restoredChats);
     setMessages(restoredMessages);
@@ -508,6 +765,7 @@ export default function App() {
     setUser(null);
     setServerUrl(null);
     setChats([]);
+    setGroups([]);
     setMessages([]);
     setOutbox([]);
     AsyncStorage.clear();
@@ -518,7 +776,7 @@ export default function App() {
   }
 
   if (loading) {
-    return null; // Splash handles initial loaders
+    return null;
   }
 
   return (
@@ -548,8 +806,18 @@ export default function App() {
                 <MainTabs
                   {...props}
                   chats={chats}
+                  groups={groups}
                   messages={messages}
+                  activeTab={activeTab}
+                  onSwitchTab={handleSwitchTab}
                   onSelectChat={handleSelectChat}
+                  onSelectGroup={handleSelectGroup}
+                  onCreateGroup={handleCreateGroup}
+                  onDeleteSelectedChats={handleDeleteSelectedChats}
+                  onDeleteSelectedGroups={handleDeleteSelectedGroups}
+                  onExitSelectedGroups={handleExitSelectedGroups}
+                  onAcceptRequest={handleAcceptRequest}
+                  onDeclineRequest={handleDeclineRequest}
                   onRestoreCompleted={handleRestoreCompleted}
                   onLogout={handleLogout}
                   serverUrl={serverUrl}
@@ -576,6 +844,10 @@ export default function App() {
                   serverUrl={serverUrl}
                   token={token}
                   currentUsername={user?.username}
+                  onOpenGroupDetails={(group) => {
+                    setGroupDetailsGroup(group);
+                    setShowGroupDetailsModal(true);
+                  }}
                 />
               )}
             </Stack.Screen>
@@ -593,6 +865,18 @@ export default function App() {
             </Stack.Screen>
           </Stack.Navigator>
         )}
+
+        {/* Global Group Details Modal */}
+        <GroupDetailsModal
+          visible={showGroupDetailsModal}
+          onClose={() => setShowGroupDetailsModal(false)}
+          group={groupDetailsGroup}
+          currentUser={user}
+          contacts={chats}
+          onAddMembers={handleAddMembersToGroup}
+          onExitGroup={handleExitGroup}
+          onDeleteGroup={handleDeleteGroup}
+        />
       </NavigationContainer>
     </SafeAreaProvider>
   );
