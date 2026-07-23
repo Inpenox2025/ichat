@@ -92,6 +92,11 @@ app.all('/api/auth/me', (req, res, next) => {
   next();
 }, runHandler('./api/auth'));
 
+app.all('/api/auth/logout-all-devices', (req, res, next) => {
+  req.query.action = 'logout-all-devices';
+  next();
+}, runHandler('./api/auth'));
+
 app.all('/api/auth/delete-account', (req, res, next) => {
   req.query.action = 'delete-account';
   next();

@@ -8,6 +8,7 @@
     { "source": "/api/auth/verify-otp", "destination": "/api/auth?action=verify-otp" },
     { "source": "/api/auth/register-username", "destination": "/api/auth?action=register-username" },
     { "source": "/api/auth/me", "destination": "/api/auth?action=me" },
+    { "source": "/api/auth/logout-all-devices", "destination": "/api/auth?action=logout-all-devices" },
     { "source": "/api/auth/delete-account", "destination": "/api/auth?action=delete-account" },
     { "source": "/api/users/search", "destination": "/api/users?action=search" },
     { "source": "/api/users/keys", "destination": "/api/users?action=keys" },

@@ -48,6 +48,8 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
   const [chatStorageList, setChatStorageList] = useState([]);
   const [expandedChats, setExpandedChats] = useState({});
   const [backupSchedule, setBackupSchedule] = useState('never');
+  const [backupStatusMsg, setBackupStatusMsg] = useState('');
+  const [restoreStatusMsg, setRestoreStatusMsg] = useState('');
 
   useEffect(() => {
     AsyncStorage.getItem('ichat_backup_schedule').then(s => { if (s) setBackupSchedule(s); });
@@ -164,6 +166,7 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
       return;
     }
     setLoading(true);
+    setBackupStatusMsg('⏳ Step 1/3: Deriving key & encrypting database...');
     try {
       const pub = await AsyncStorage.getItem('ichat_identity_key_public');
       const priv = await AsyncStorage.getItem('ichat_identity_key_private');
@@ -171,6 +174,7 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
       const keyBytes = pbkdf2Sync(backupPass, user.email, 2000, 32);
       const encrypted = encryptSymmetric(JSON.stringify(payload), keyBytes);
 
+      setBackupStatusMsg('☁️ Step 2/3: Uploading encrypted payload to cloud account...');
       const res = await fetch(`${serverUrl}/api/backup`, {
         method: 'POST',
         headers: {
@@ -184,15 +188,21 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
 
       const statusStr = new Date().toLocaleString();
       await AsyncStorage.setItem('ichat_backup_status', statusStr);
+      await AsyncStorage.setItem('ichat_backup_passcode', backupPass);
       setBackupStatus(statusStr);
+      setBackupStatusMsg('✅ Step 3/3: Backup completed successfully!');
       Alert.alert('Cloud Backup Complete', 'Encrypted chat history and E2EE keys backed up securely to your account.');
-    } catch (err) { Alert.alert('Backup failed', err.message); }
+    } catch (err) {
+      setBackupStatusMsg(`❌ Backup failed: ${err.message}`);
+      Alert.alert('Backup failed', err.message);
+    }
     finally { setLoading(false); }
   }
 
   async function handleCloudRestore() {
     if (!restorePass) { Alert.alert('Passcode Required', 'Please enter your backup passcode.'); return; }
     setLoading(true);
+    setRestoreStatusMsg('☁️ Step 1/3: Downloading encrypted payload from account...');
     try {
       const res = await fetch(`${serverUrl}/api/backup`, {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -200,10 +210,12 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'No backup found for this account.');
 
+      setRestoreStatusMsg('🔑 Step 2/3: Deriving key & decrypting payload...');
       const blob = JSON.parse(data.backup_data);
       const keyBytes = pbkdf2Sync(restorePass, user.email, 2000, 32);
       const decrypted = JSON.parse(decryptSymmetric(blob.ciphertext, blob.nonce, keyBytes));
 
+      setRestoreStatusMsg('💾 Step 3/3: Restoring chats, messages & keys to local database...');
       await AsyncStorage.setItem('ichat_identity_key_public', decrypted.keys.publicKey);
       await AsyncStorage.setItem('ichat_identity_key_private', decrypted.keys.privateKey);
       await AsyncStorage.setItem('ichat_chats', JSON.stringify(decrypted.chats));
@@ -211,8 +223,12 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
 
       onRestoreCompleted(decrypted.chats, decrypted.messages);
       setRestorePass('');
+      setRestoreStatusMsg('✅ Restore completed successfully!');
       Alert.alert('Restore Complete', 'Encrypted chat history and keys restored successfully!');
-    } catch (err) { Alert.alert('Restore failed', 'Wrong passcode or corrupt backup data.'); }
+    } catch (err) {
+      setRestoreStatusMsg('❌ Restore failed: Wrong passcode or corrupt backup data.');
+      Alert.alert('Restore failed', 'Wrong passcode or corrupt backup data.');
+    }
     finally { setLoading(false); }
   }
 
@@ -455,6 +471,11 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
                 {loading ? <ActivityIndicator color="#0c101a" /> : <Text style={{ color: C.isDark ? '#0c101a' : '#ffffff', fontWeight: '700', fontSize: 13 }}>☁️ Backup to Cloud</Text>}
               </TouchableOpacity>
             </View>
+            {backupStatusMsg ? (
+              <View style={{ marginTop: 10, padding: 8, backgroundColor: C.accentBg, borderRadius: 6, borderWidth: 1, borderColor: C.border }}>
+                <Text style={{ color: C.accent, fontSize: 11, fontWeight: '600', textAlign: 'center' }}>{backupStatusMsg}</Text>
+              </View>
+            ) : null}
           </Card>
 
           {/* Cloud Account Restore */}
@@ -465,6 +486,11 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
             <TouchableOpacity style={{ backgroundColor: C.cardAlt, borderWidth: 1, borderColor: C.borderStrong, borderRadius: 8, padding: 12, alignItems: 'center' }} onPress={handleCloudRestore} disabled={loading}>
               {loading ? <ActivityIndicator color={C.text} /> : <Text style={{ color: C.text, fontWeight: '700', fontSize: 13 }}>☁️ Restore from Cloud</Text>}
             </TouchableOpacity>
+            {restoreStatusMsg ? (
+              <View style={{ marginTop: 10, padding: 8, backgroundColor: C.accentBg, borderRadius: 6, borderWidth: 1, borderColor: C.border }}>
+                <Text style={{ color: C.accent, fontSize: 11, fontWeight: '600', textAlign: 'center' }}>{restoreStatusMsg}</Text>
+              </View>
+            ) : null}
           </Card>
 
           {/* Local File Export / Import */}

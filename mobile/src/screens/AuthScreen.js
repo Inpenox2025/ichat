@@ -172,104 +172,129 @@ export default function AuthScreen({ onAuthSuccess }) {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#0c101a' }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#090d16' }}>
       <ScrollView contentContainerStyle={styles.container}>
-        <View class="auth-card" style={styles.card}>
-          <Text style={styles.logo}>ichat</Text>
-          <Text style={styles.subtitle}>Secure End-to-End Encrypted Chat</Text>
+        <View style={styles.card}>
+          
+          {/* Logo & E2EE Header */}
+          <View style={styles.headerBox}>
+            <View style={styles.iconCircle}>
+              <Text style={{ fontSize: 26 }}>🔒</Text>
+            </View>
+            <Text style={styles.logo}>ichat</Text>
+            <View style={styles.e2eeBadge}>
+              <Text style={styles.e2eeBadgeText}>🛡️ ZERO-KNOWLEDGE E2EE</Text>
+            </View>
+            <Text style={styles.subtitle}>Private, Encrypted Messaging System</Text>
+          </View>
+
+          {/* Step Progress Indicator */}
+          <View style={styles.stepIndicator}>
+            <View style={[styles.stepDot, step >= 1 && styles.stepDotActive]} />
+            <View style={[styles.stepLine, step >= 2 && styles.stepLineActive]} />
+            <View style={[styles.stepDot, step >= 2 && styles.stepDotActive]} />
+            <View style={[styles.stepLine, step >= 3 && styles.stepLineActive]} />
+            <View style={[styles.stepDot, step >= 3 && styles.stepDotActive]} />
+          </View>
 
           {/* Step 1: Request OTP */}
           {step === 1 && (
             <View style={styles.form}>
+              <Text style={styles.stepTitle}>Enter Your Email</Text>
               <Text style={styles.label}>Email Address</Text>
               <TextInput
                 style={styles.input}
                 value={email}
                 onChangeText={setEmail}
                 placeholder="name@domain.com"
+                placeholderTextColor="#4a5568"
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoComplete="email"
               />
 
               <TouchableOpacity style={styles.button} onPress={handleSendOtp} disabled={loading}>
-                {loading ? <ActivityIndicator color="#0c101a" /> : <Text style={styles.buttonText}>Send Code</Text>}
+                {loading ? <ActivityIndicator color="#0c101a" /> : <Text style={styles.buttonText}>Send Code →</Text>}
               </TouchableOpacity>
             </View>
           )}
 
-        {/* Step 2: Verify OTP */}
-        {step === 2 && (
-          <View style={styles.form}>
-            <TouchableOpacity style={styles.backBtn} onPress={() => setStep(1)}>
-              <Text style={styles.backBtnText}>← Change Email</Text>
-            </TouchableOpacity>
-
-            <Text style={styles.label}>Enter Code sent to {email}</Text>
-            <TextInput
-              style={styles.input}
-              value={otp}
-              onChangeText={setOtp}
-              placeholder="6-digit verification code"
-              keyboardType="number-pad"
-              maxLength={6}
-            />
-
-            <TouchableOpacity style={styles.button} onPress={() => handleVerifyOtp()} disabled={loading}>
-              {loading ? <ActivityIndicator color="#0c101a" /> : <Text style={styles.buttonText}>Verify OTP</Text>}
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* Step 3: Choose Username */}
-        {step === 3 && (
-          <View style={styles.form}>
-            <Text style={styles.label}>Set Unique Username</Text>
-            <TextInput
-              style={styles.input}
-              value={username}
-              onChangeText={setUsername}
-              placeholder="e.g. alice_secure"
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            <Text style={styles.tip}>3-20 characters: letters, numbers, and underscores.</Text>
-
-            <TouchableOpacity style={styles.button} onPress={handleSetUsername} disabled={loading}>
-              {loading ? <ActivityIndicator color="#0c101a" /> : <Text style={styles.buttonText}>Set Username</Text>}
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* Step 4: Device Limit Conflict */}
-        {step === 4 && (
-          <View style={styles.form}>
-            <Text style={styles.conflictHeader}>⚠️ Session Limit Exceeded</Text>
-            <Text style={styles.conflictDesc}>You have reached the maximum of 3 active devices. Tap a device below to replace it with this device:</Text>
-            
-            {conflictDevices.map((dev) => (
-              <TouchableOpacity 
-                key={dev.device_id} 
-                style={styles.conflictItem}
-                onPress={() => handleVerifyOtp(dev.device_id)}
-              >
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.conflictDeviceName}>{dev.device_name || 'Unknown Device'}</Text>
-                  <Text style={styles.conflictDeviceDate}>Last active: {new Date(dev.last_active).toLocaleDateString()}</Text>
-                </View>
-                <View style={styles.replaceChip}>
-                  <Text style={styles.replaceChipText}>Replace →</Text>
-                </View>
+          {/* Step 2: Verify OTP */}
+          {step === 2 && (
+            <View style={styles.form}>
+              <TouchableOpacity style={styles.backBtn} onPress={() => setStep(1)}>
+                <Text style={styles.backBtnText}>← Change Email ({email})</Text>
               </TouchableOpacity>
-            ))}
 
-            <TouchableOpacity style={[styles.button, {backgroundColor: '#2d3748', marginTop: 10}]} onPress={() => setStep(2)}>
-              <Text style={styles.buttonText}>← Go Back</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-      </View>
-    </ScrollView>
+              <Text style={styles.stepTitle}>Verify Security Code</Text>
+              <Text style={styles.label}>Enter 6-Digit Code</Text>
+              <TextInput
+                style={[styles.input, { letterSpacing: 4, fontSize: 18, textAlign: 'center' }]}
+                value={otp}
+                onChangeText={setOtp}
+                placeholder="• • • • • •"
+                placeholderTextColor="#4a5568"
+                keyboardType="number-pad"
+                maxLength={6}
+              />
+
+              <TouchableOpacity style={styles.button} onPress={() => handleVerifyOtp()} disabled={loading}>
+                {loading ? <ActivityIndicator color="#0c101a" /> : <Text style={styles.buttonText}>Verify & Login ✓</Text>}
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Step 3: Choose Username */}
+          {step === 3 && (
+            <View style={styles.form}>
+              <Text style={styles.stepTitle}>Set Your Handle</Text>
+              <Text style={styles.label}>Choose Username</Text>
+              <TextInput
+                style={styles.input}
+                value={username}
+                onChangeText={setUsername}
+                placeholder="e.g. alice_secure"
+                placeholderTextColor="#4a5568"
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <Text style={styles.tip}>3-20 characters: letters, numbers, and underscores.</Text>
+
+              <TouchableOpacity style={styles.button} onPress={handleSetUsername} disabled={loading}>
+                {loading ? <ActivityIndicator color="#0c101a" /> : <Text style={styles.buttonText}>Complete Setup →</Text>}
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Step 4: Device Limit Conflict */}
+          {step === 4 && (
+            <View style={styles.form}>
+              <Text style={styles.conflictHeader}>⚠️ Device Limit Exceeded</Text>
+              <Text style={styles.conflictDesc}>You have reached the maximum limit of 3 active devices. Select a device below to replace with this session:</Text>
+              
+              {conflictDevices.map((dev) => (
+                <TouchableOpacity 
+                  key={dev.device_id} 
+                  style={styles.conflictItem}
+                  onPress={() => handleVerifyOtp(dev.device_id)}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.conflictDeviceName}>{dev.device_name || 'Unknown Device'}</Text>
+                    <Text style={styles.conflictDeviceDate}>Last active: {new Date(dev.last_active).toLocaleDateString()}</Text>
+                  </View>
+                  <View style={styles.replaceChip}>
+                    <Text style={styles.replaceChipText}>Replace →</Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+
+              <TouchableOpacity style={[styles.button, {backgroundColor: '#2d3748', marginTop: 10}]} onPress={() => setStep(2)}>
+                <Text style={styles.buttonText}>← Go Back</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -277,91 +302,161 @@ export default function AuthScreen({ onAuthSuccess }) {
 const styles = StyleSheet.create({
   container: {
     flexGrow: 1,
-    backgroundColor: '#0c101a',
+    backgroundColor: '#090d16',
     justifyContent: 'center',
-    padding: 24,
+    padding: 20,
   },
   card: {
-    backgroundColor: 'rgba(22, 28, 45, 0.75)',
-    borderRadius: 20,
-    padding: 32,
+    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+    borderRadius: 24,
+    padding: 28,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: 'rgba(0, 242, 254, 0.2)',
     alignItems: 'center',
+    shadowColor: '#00f2fe',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    elevation: 8,
+  },
+  headerBox: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  iconCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(0, 242, 254, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 242, 254, 0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
   },
   logo: {
-    fontFamily: 'System',
-    fontWeight: '800',
-    fontSize: 36,
+    fontWeight: '900',
+    fontSize: 34,
     color: '#00f2fe',
+    letterSpacing: -0.5,
+    marginBottom: 6,
+  },
+  e2eeBadge: {
+    backgroundColor: 'rgba(0, 242, 254, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 242, 254, 0.3)',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
     marginBottom: 8,
   },
+  e2eeBadgeText: {
+    color: '#00f2fe',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
   subtitle: {
-    color: '#a0aec0',
-    fontSize: 14,
-    marginBottom: 36,
+    color: '#94a3b8',
+    fontSize: 13,
     textAlign: 'center',
+  },
+  stepIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 24,
+    width: '60%',
+  },
+  stepDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#1e293b',
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  stepDotActive: {
+    backgroundColor: '#00f2fe',
+    borderColor: '#00f2fe',
+  },
+  stepLine: {
+    flex: 1,
+    height: 2,
+    backgroundColor: '#1e293b',
+    marginHorizontal: 4,
+  },
+  stepLineActive: {
+    backgroundColor: '#00f2fe',
   },
   form: {
     width: '100%',
   },
+  stepTitle: {
+    color: '#f8fafc',
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 14,
+    textAlign: 'center',
+  },
   label: {
-    color: '#e2e8f0',
-    fontSize: 12,
+    color: '#94a3b8',
+    fontSize: 11,
     fontWeight: '700',
     textTransform: 'uppercase',
+    letterSpacing: 0.5,
     marginBottom: 8,
   },
   input: {
     backgroundColor: '#06080d',
     borderWidth: 1,
-    borderColor: '#2d3748',
-    borderRadius: 10,
+    borderColor: '#334155',
+    borderRadius: 12,
     color: '#fff',
     padding: 14,
     fontSize: 15,
-    marginBottom: 20,
+    marginBottom: 18,
   },
   button: {
     backgroundColor: '#00f2fe',
-    borderRadius: 10,
+    borderRadius: 12,
     padding: 16,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#00f2fe',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.25,
     shadowRadius: 10,
     elevation: 5,
-    marginTop: 10,
+    marginTop: 6,
   },
   buttonText: {
     color: '#0c101a',
-    fontWeight: '700',
-    fontSize: 16,
+    fontWeight: '800',
+    fontSize: 15,
   },
   backBtn: {
-    marginBottom: 16,
+    marginBottom: 14,
   },
   backBtnText: {
     color: '#00f2fe',
     fontWeight: '600',
-    fontSize: 14,
+    fontSize: 13,
   },
   tip: {
-    color: '#718096',
+    color: '#64748b',
     fontSize: 11,
     marginBottom: 16,
   },
   conflictHeader: {
-    color: '#f56565',
+    color: '#ef4444',
     fontWeight: '700',
-    fontSize: 18,
+    fontSize: 17,
     marginBottom: 10,
     textAlign: 'center',
   },
   conflictDesc: {
-    color: '#a0aec0',
+    color: '#94a3b8',
     fontSize: 13,
     marginBottom: 20,
     lineHeight: 18,
@@ -370,8 +465,8 @@ const styles = StyleSheet.create({
   conflictItem: {
     backgroundColor: '#06080d',
     borderWidth: 1,
-    borderColor: '#2d3748',
-    borderRadius: 8,
+    borderColor: '#334155',
+    borderRadius: 10,
     padding: 14,
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -384,7 +479,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   conflictDeviceDate: {
-    color: '#718096',
+    color: '#64748b',
     fontSize: 11,
   },
   replaceChip: {
@@ -398,36 +493,5 @@ const styles = StyleSheet.create({
     color: '#0c101a',
     fontWeight: '700',
     fontSize: 11,
-  },
-  advancedToggle: {
-    marginTop: 16,
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
-  advancedToggleText: {
-    color: '#4a5568',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  advancedBox: {
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderWidth: 1,
-    borderColor: '#2d3748',
-    borderRadius: 10,
-    padding: 12,
-    marginTop: 4,
-  },
-  advancedLabel: {
-    color: '#a0aec0',
-    fontSize: 11,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    marginBottom: 6,
-  },
-  advancedHint: {
-    color: '#4a5568',
-    fontSize: 11,
-    marginTop: 6,
-    lineHeight: 15,
   },
 });
