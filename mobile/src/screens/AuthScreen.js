@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { generateIdentityKeys } from '../services/crypto';
 
@@ -12,8 +13,7 @@ export default function AuthScreen({ onAuthSuccess }) {
   const [loading, setLoading] = useState(false);
   const [deviceId, setDeviceId] = useState('');
   const [conflictDevices, setConflictDevices] = useState([]);
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  
+
   // E2EE credentials cached during auth
   const [localKeys, setLocalKeys] = useState(null);
 
@@ -172,49 +172,31 @@ export default function AuthScreen({ onAuthSuccess }) {
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <View class="auth-card" style={styles.card}>
-        <Text style={styles.logo}>ichat</Text>
-        <Text style={styles.subtitle}>Secure End-to-End Encrypted Chat</Text>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#0c101a' }}>
+      <ScrollView contentContainerStyle={styles.container}>
+        <View class="auth-card" style={styles.card}>
+          <Text style={styles.logo}>ichat</Text>
+          <Text style={styles.subtitle}>Secure End-to-End Encrypted Chat</Text>
 
-        {/* Step 1: Request OTP */}
-        {step === 1 && (
-          <View style={styles.form}>
-            <Text style={styles.label}>Email Address</Text>
-            <TextInput
-              style={styles.input}
-              value={email}
-              onChangeText={setEmail}
-              placeholder="name@domain.com"
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoComplete="email"
-            />
+          {/* Step 1: Request OTP */}
+          {step === 1 && (
+            <View style={styles.form}>
+              <Text style={styles.label}>Email Address</Text>
+              <TextInput
+                style={styles.input}
+                value={email}
+                onChangeText={setEmail}
+                placeholder="name@domain.com"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoComplete="email"
+              />
 
-            <TouchableOpacity style={styles.button} onPress={handleSendOtp} disabled={loading}>
-              {loading ? <ActivityIndicator color="#0c101a" /> : <Text style={styles.buttonText}>Send Code</Text>}
-            </TouchableOpacity>
-
-            {/* Advanced: Server URL override for local testing */}
-            <TouchableOpacity style={styles.advancedToggle} onPress={() => setShowAdvanced(prev => !prev)}>
-              <Text style={styles.advancedToggleText}>{showAdvanced ? '▲ Hide' : '▼ Advanced'} Settings</Text>
-            </TouchableOpacity>
-            {showAdvanced && (
-              <View style={styles.advancedBox}>
-                <Text style={styles.advancedLabel}>Server URL (for local testing)</Text>
-                <TextInput
-                  style={[styles.input, { fontSize: 12, paddingVertical: 8 }]}
-                  value={serverUrl}
-                  onChangeText={setServerUrl}
-                  placeholder="https://ichat.inspenox.in"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
-                <Text style={styles.advancedHint}>Change to http://&lt;your-ip&gt;:3000 for local server testing</Text>
-              </View>
-            )}
-          </View>
-        )}
+              <TouchableOpacity style={styles.button} onPress={handleSendOtp} disabled={loading}>
+                {loading ? <ActivityIndicator color="#0c101a" /> : <Text style={styles.buttonText}>Send Code</Text>}
+              </TouchableOpacity>
+            </View>
+          )}
 
         {/* Step 2: Verify OTP */}
         {step === 2 && (
@@ -288,6 +270,7 @@ export default function AuthScreen({ onAuthSuccess }) {
         )}
       </View>
     </ScrollView>
+    </SafeAreaView>
   );
 }
 

@@ -188,7 +188,7 @@ export default function App() {
   // Decode E2EE message packets (including Group Messages)
   async function handleIncomingMessage(data) {
     const current = stateRef.current;
-    const { messageId, sender, recipient, key, payload, timestamp, media, isSenderSync, isGroup, groupId, groupName } = data;
+    const { messageId, sender, recipient, key, keys, payload, timestamp, media, isSenderSync, isGroup, groupId, groupName } = data;
     const partner = isGroup ? groupId : (isSenderSync ? recipient : sender);
 
     if (current.messages.some(m => m.id === messageId)) return;
@@ -204,20 +204,38 @@ export default function App() {
 
       const myPriv = await AsyncStorage.getItem('ichat_identity_key_private');
       const myPrivBytes = decodeBase64(myPriv);
+      const myDeviceId = await AsyncStorage.getItem('ichat_device_id');
+
+      // Collect candidate encrypted keys
+      const targetEncryptedKeys = [];
+      if (keys && typeof keys === 'object') {
+        if (myDeviceId && keys[myDeviceId]) {
+          targetEncryptedKeys.push(keys[myDeviceId]);
+        }
+        Object.values(keys).forEach(k => {
+          if (k && !targetEncryptedKeys.includes(k)) targetEncryptedKeys.push(k);
+        });
+      }
+      if (key && !targetEncryptedKeys.includes(key)) {
+        targetEncryptedKeys.push(key);
+      }
 
       let decryptedBody = '';
       const allKnownDevices = [...(result.recipient_devices || []), ...(result.sender_other_devices || [])];
 
-      for (const dev of allKnownDevices) {
-        try {
-          const devPub = decodeBase64(dev.public_key);
-          const nonceBytes = decodeBase64(sqlPayload.nonce);
-          const decryptedSessionKey = decryptAsymmetric(devPub, myPrivBytes, key, nonceBytes);
-          if (decryptedSessionKey) {
-            decryptedBody = decryptSymmetric(sqlPayload.encryptedBody, sqlPayload.nonce, decryptedSessionKey);
-            break;
-          }
-        } catch (e) {}
+      for (const encSessionKey of targetEncryptedKeys) {
+        for (const dev of allKnownDevices) {
+          try {
+            const devPub = decodeBase64(dev.public_key);
+            const nonceBytes = decodeBase64(sqlPayload.nonce);
+            const decryptedSessionKey = decryptAsymmetric(devPub, myPrivBytes, encSessionKey, nonceBytes);
+            if (decryptedSessionKey) {
+              decryptedBody = decryptSymmetric(sqlPayload.encryptedBody, sqlPayload.nonce, decryptedSessionKey);
+              if (decryptedBody) break;
+            }
+          } catch (e) {}
+        }
+        if (decryptedBody) break;
       }
 
       if (!decryptedBody && !media) {
@@ -373,8 +391,8 @@ export default function App() {
     if (type === 'group_message' && group) {
       // Group E2EE Dispatches
       const sessionKey = nacl.randomBytes(32);
-      const nonce = nacl.randomBytes(24);
       const content = encryptSymmetric(body || '', sessionKey);
+      const nonceBytes = decodeBase64(content.nonce);
 
       const myPriv = await AsyncStorage.getItem('ichat_identity_key_private');
       const myPrivBytes = decodeBase64(myPriv);
@@ -392,7 +410,7 @@ export default function App() {
           const keysMap = {};
           for (const dev of (result.recipient_devices || [])) {
             const devPub = decodeBase64(dev.public_key);
-            keysMap[dev.device_id] = encryptAsymmetric(devPub, myPrivBytes, sessionKey, nonce);
+            keysMap[dev.device_id] = encryptAsymmetric(devPub, myPrivBytes, sessionKey, nonceBytes);
           }
 
           const payload = { encryptedBody: content.ciphertext, nonce: content.nonce };
@@ -451,8 +469,8 @@ export default function App() {
     }
 
     const sessionKey = nacl.randomBytes(32);
-    const nonce = nacl.randomBytes(24);
     const content = encryptSymmetric(body || '', sessionKey);
+    const nonceBytes = decodeBase64(content.nonce);
 
     const keysMap = {};
     const myPriv = await AsyncStorage.getItem('ichat_identity_key_private');
@@ -460,12 +478,12 @@ export default function App() {
 
     for (const dev of recipientKeys) {
       const devPub = decodeBase64(dev.public_key);
-      keysMap[dev.device_id] = encryptAsymmetric(devPub, myPrivBytes, sessionKey, nonce);
+      keysMap[dev.device_id] = encryptAsymmetric(devPub, myPrivBytes, sessionKey, nonceBytes);
     }
 
     for (const dev of senderOtherKeys) {
       const devPub = decodeBase64(dev.public_key);
-      keysMap[dev.device_id] = encryptAsymmetric(devPub, myPrivBytes, sessionKey, nonce);
+      keysMap[dev.device_id] = encryptAsymmetric(devPub, myPrivBytes, sessionKey, nonceBytes);
     }
 
     const payload = {

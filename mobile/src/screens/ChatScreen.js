@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, Text, View, FlatList, TextInput, TouchableOpacity, Image, Alert, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
@@ -282,77 +283,79 @@ export default function ChatScreen({ route, navigation, messages, onSendMessage,
   }
 
   return (
-    <KeyboardAvoidingView 
-      style={styles.container} 
-      behavior={Platform.OS === 'ios' ? 'padding' : null}
-      keyboardVerticalOffset={90}
-    >
-      {/* Header bar */}
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color="#fff" />
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.headerUser} 
-          onPress={() => isGroup && onOpenGroupDetails && onOpenGroupDetails(group)}
-          disabled={!isGroup}
-        >
-          <Text style={styles.headerTitle}>{displayTitle}</Text>
-          {typingStatus ? (
-            <Text style={styles.headerTyping}>is typing...</Text>
-          ) : (
-            <Text style={styles.headerSubtitle}>
-              {isGroup ? `${group?.members?.length || 0} Members • Group Info` : 'Active Secure Room'}
-            </Text>
-          )}
-        </TouchableOpacity>
-
-        {!isGroup && (
-          <TouchableOpacity style={styles.callBtn} onPress={handleTriggerCall}>
-            <Ionicons name="call" size={20} color="#00f2fe" />
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#0c101a' }} edges={['top', 'left', 'right', 'bottom']}>
+      <KeyboardAvoidingView 
+        style={styles.container} 
+        behavior={Platform.OS === 'ios' ? 'padding' : null}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+      >
+        {/* Header bar */}
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+            <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
-        )}
-      </View>
+          
+          <TouchableOpacity 
+            style={styles.headerUser} 
+            onPress={() => isGroup && onOpenGroupDetails && onOpenGroupDetails(group)}
+            disabled={!isGroup}
+          >
+            <Text style={styles.headerTitle}>{displayTitle}</Text>
+            {typingStatus ? (
+              <Text style={styles.headerTyping}>is typing...</Text>
+            ) : (
+              <Text style={styles.headerSubtitle}>
+                {isGroup ? `${group?.members?.length || 0} Members • Group Info` : 'Active Secure Room'}
+              </Text>
+            )}
+          </TouchableOpacity>
 
-      <FlatList
-        ref={flatListRef}
-        data={chatMessages}
-        keyExtractor={(item) => item.id}
-        renderItem={renderMessageItem}
-        contentContainerStyle={styles.history}
-        onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-        onLayout={() => flatListRef.current?.scrollToEnd({ animated: true })}
-      />
-
-      {/* Media uploading indicator spinner */}
-      {mediaUploading && (
-        <View style={styles.uploadingOverlay}>
-          <ActivityIndicator size="small" color="#00f2fe" />
-          <Text style={styles.uploadingText}>Encrypting & uploading attachment...</Text>
+          {!isGroup && (
+            <TouchableOpacity style={styles.callBtn} onPress={handleTriggerCall}>
+              <Ionicons name="call" size={20} color="#00f2fe" />
+            </TouchableOpacity>
+          )}
         </View>
-      )}
 
-      {/* Chat inputs panel */}
-      <View style={styles.inputBar}>
-        <TouchableOpacity style={styles.attachBtn} onPress={handleAttachmentPress}>
-          <Ionicons name="add" size={24} color="#a0aec0" />
-        </TouchableOpacity>
-        
-        <TextInput
-          style={styles.textInput}
-          value={text}
-          onChangeText={handleTextChange}
-          placeholder="Type secure message..."
-          placeholderTextColor="#718096"
-          multiline
+        <FlatList
+          ref={flatListRef}
+          data={chatMessages}
+          keyExtractor={(item) => item.id}
+          renderItem={renderMessageItem}
+          contentContainerStyle={styles.history}
+          onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+          onLayout={() => flatListRef.current?.scrollToEnd({ animated: true })}
         />
 
-        <TouchableOpacity style={styles.sendBtn} onPress={handleSendText}>
-          <Ionicons name="send" size={18} color="#0c101a" />
-        </TouchableOpacity>
-      </View>
-    </KeyboardAvoidingView>
+        {/* Media uploading indicator spinner */}
+        {mediaUploading && (
+          <View style={styles.uploadingOverlay}>
+            <ActivityIndicator size="small" color="#00f2fe" />
+            <Text style={styles.uploadingText}>Encrypting & uploading attachment...</Text>
+          </View>
+        )}
+
+        {/* Chat inputs panel */}
+        <View style={styles.inputBar}>
+          <TouchableOpacity style={styles.attachBtn} onPress={handleAttachmentPress}>
+            <Ionicons name="add" size={24} color="#a0aec0" />
+          </TouchableOpacity>
+          
+          <TextInput
+            style={styles.textInput}
+            value={text}
+            onChangeText={handleTextChange}
+            placeholder="Type secure message..."
+            placeholderTextColor="#718096"
+            multiline
+          />
+
+          <TouchableOpacity style={styles.sendBtn} onPress={handleSendText}>
+            <Ionicons name="send" size={18} color="#0c101a" />
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
