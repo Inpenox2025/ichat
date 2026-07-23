@@ -242,8 +242,8 @@ export default function AuthScreen({ onAuthSuccess }) {
         {/* Step 4: Device Limit Conflict */}
         {step === 4 && (
           <View style={styles.form}>
-            <Text style={styles.conflictHeader}>Session Limit Exceeded</Text>
-            <Text style={styles.conflictDesc}>You can only register up to 3 active devices. Select an existing session to replace:</Text>
+            <Text style={styles.conflictHeader}>⚠️ Session Limit Exceeded</Text>
+            <Text style={styles.conflictDesc}>You have reached the maximum of 3 active devices. Tap a device below to replace it with this device:</Text>
             
             {conflictDevices.map((dev) => (
               <TouchableOpacity 
@@ -251,13 +251,18 @@ export default function AuthScreen({ onAuthSuccess }) {
                 style={styles.conflictItem}
                 onPress={() => handleVerifyOtp(dev.device_id)}
               >
-                <Text style={styles.conflictDeviceName}>{dev.device_name}</Text>
-                <Text style={styles.conflictDeviceDate}>Active: {new Date(dev.last_active).toLocaleDateString()}</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.conflictDeviceName}>{dev.device_name || 'Unknown Device'}</Text>
+                  <Text style={styles.conflictDeviceDate}>Last active: {new Date(dev.last_active).toLocaleDateString()}</Text>
+                </View>
+                <View style={styles.replaceChip}>
+                  <Text style={styles.replaceChipText}>Replace →</Text>
+                </View>
               </TouchableOpacity>
             ))}
 
-            <TouchableOpacity style={[styles.button, {backgroundColor: '#555', marginTop: 10}]} onPress={() => setStep(2)}>
-              <Text style={styles.buttonText}>Back</Text>
+            <TouchableOpacity style={[styles.button, {backgroundColor: '#2d3748', marginTop: 10}]} onPress={() => setStep(2)}>
+              <Text style={styles.buttonText}>← Go Back</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -377,6 +382,18 @@ const styles = StyleSheet.create({
   },
   conflictDeviceDate: {
     color: '#718096',
+    fontSize: 11,
+  },
+  replaceChip: {
+    backgroundColor: '#00f2fe',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    marginLeft: 8,
+  },
+  replaceChipText: {
+    color: '#0c101a',
+    fontWeight: '700',
     fontSize: 11,
   }
 });

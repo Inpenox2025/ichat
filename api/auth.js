@@ -224,6 +224,14 @@ module.exports = async function handler(req, res) {
     }
 
     // ----------------------------------------------------
+    // ACTION: LOGOUT-ALL-DEVICES
+    // ----------------------------------------------------
+    if (action === 'logout-all-devices') {
+      await sql`DELETE FROM devices WHERE user_id = ${decoded.userId}`;
+      return res.status(200).json({ success: true, message: 'All sessions revoked. Please log in again.' });
+    }
+
+    // ----------------------------------------------------
     // ACTION: DELETE-ACCOUNT
     // ----------------------------------------------------
     if (action === 'delete-account') {

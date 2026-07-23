@@ -1,42 +1,32 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, ScrollView, TextInput, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
+import {
+  StyleSheet, Text, View, ScrollView, TextInput, TouchableOpacity,
+  Alert, ActivityIndicator, SafeAreaView, StatusBar
+} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { pbkdf2Sync, encryptSymmetric, decryptSymmetric, decodeBase64, encodeBase64 } from '../services/crypto';
+import { useTheme } from '../context/ThemeContext';
 
-export default function SettingsScreen({ navigation, chats, messages, onRestoreCompleted, onLogout, serverUrl, token, user, selectedTheme, onThemeChange }) {
-  const [themeMode, setThemeMode] = useState(selectedTheme || 'system');
+export default function SettingsScreen({ navigation, chats, messages, onRestoreCompleted, onLogout, serverUrl, token, user }) {
+  const { colors: C, selectedTheme, changeTheme } = useTheme();
+
   const [backupPass, setBackupPass] = useState('');
   const [restorePass, setRestorePass] = useState('');
   const [loading, setLoading] = useState(false);
-  
-  // Storage sizes
   const [textStorageSize, setTextStorageSize] = useState('0 KB');
   const [mediaStorageSize, setMediaStorageSize] = useState('0 MB');
   const [backupStatus, setBackupStatus] = useState('Never');
-
-  // Per-Chat storage exploration state
   const [chatStorageList, setChatStorageList] = useState([]);
   const [expandedChats, setExpandedChats] = useState({});
-
-  // Backup schedule
   const [backupSchedule, setBackupSchedule] = useState('never');
 
   useEffect(() => {
-    async function loadSchedule() {
-      const sched = await AsyncStorage.getItem('ichat_backup_schedule');
-      if (sched) setBackupSchedule(sched);
-    }
-    loadSchedule();
+    AsyncStorage.getItem('ichat_backup_schedule').then(s => { if (s) setBackupSchedule(s); });
   }, []);
-
-  async function handleScheduleChange(mode) {
-    setBackupSchedule(mode);
-    await AsyncStorage.setItem('ichat_backup_schedule', mode);
-  }
 
   useEffect(() => {
     calculateStorageSizes();
@@ -45,788 +35,380 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
   }, [chats, messages]);
 
   async function loadBackupStatus() {
-    const status = await AsyncStorage.getItem('ichat_backup_status');
-    if (status) setBackupStatus(status);
+    const s = await AsyncStorage.getItem('ichat_backup_status');
+    if (s) setBackupStatus(s);
+  }
+
+  async function handleScheduleChange(mode) {
+    setBackupSchedule(mode);
+    await AsyncStorage.setItem('ichat_backup_schedule', mode);
   }
 
   async function calculateStorageSizes() {
-    // 1. Messages JSON size
     const rawText = JSON.stringify(messages) + JSON.stringify(chats);
-    const textSizeKB = (rawText.length / 1024).toFixed(1);
-    setTextStorageSize(`${textSizeKB} KB`);
-
-    // 2. Media cache size in Document Storage
+    setTextStorageSize(`${(rawText.length / 1024).toFixed(1)} KB`);
     try {
       const files = await FileSystem.readDirectoryAsync(FileSystem.documentDirectory);
-      let totalSize = 0;
-      for (const filename of files) {
-        const info = await FileSystem.getInfoAsync(`${FileSystem.documentDirectory}${filename}`);
-        if (info.exists && !info.isDirectory) {
-          totalSize += info.size;
-        }
+      let total = 0;
+      for (const f of files) {
+        const info = await FileSystem.getInfoAsync(`${FileSystem.documentDirectory}${f}`);
+        if (info.exists && !info.isDirectory) total += info.size;
       }
-      const mediaSizeMB = (totalSize / (1024 * 1024)).toFixed(2);
-      setMediaStorageSize(`${mediaSizeMB} MB`);
-    } catch (e) {
-      console.error(e);
-    }
+      setMediaStorageSize(`${(total / (1024 * 1024)).toFixed(2)} MB`);
+    } catch (e) {}
   }
 
   function calculatePerChatStorage() {
-    const list = [];
-    for (const chat of chats) {
+    const list = chats.map(chat => {
       const chatMsgs = messages.filter(m => m.chatPartner === chat.username);
       const textBytes = JSON.stringify(chatMsgs).length;
-      
-      let mediaBytes = 0;
-      const mediaFiles = [];
-      for (const m of chatMsgs) {
-        if (m.media) {
-          mediaBytes += m.media.size || 0;
-          mediaFiles.push(m);
-        }
-      }
-      
-      list.push({
-        username: chat.username,
-        textBytes,
-        mediaBytes,
-        totalBytes: textBytes + mediaBytes,
-        mediaFiles
-      });
-    }
-    
-    // Sort largest total storage occupied first
+      const mediaFiles = chatMsgs.filter(m => m.media);
+      const mediaBytes = mediaFiles.reduce((acc, m) => acc + (m.media.size || 0), 0);
+      return { username: chat.username, textBytes, mediaBytes, totalBytes: textBytes + mediaBytes, mediaFiles };
+    });
     list.sort((a, b) => b.totalBytes - a.totalBytes);
     setChatStorageList(list);
   }
 
   async function handleDeleteFile(chatUsername, msg) {
-    Alert.alert(
-      'Delete File',
-      `Delete "${msg.media.filename}" from this chat to free storage?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            // Delete file from Document Directory
-            const localPath = `${FileSystem.documentDirectory}${msg.media.filename}`;
-            await FileSystem.deleteAsync(localPath, { idempotent: true });
-
-            // Update messages list
-            const updatedMessages = messages.map(m => {
-              if (m.id === msg.id) {
-                return { ...m, body: `[File deleted: ${msg.media.filename}]`, media: null };
-              }
-              return m;
-            });
-
-            await AsyncStorage.setItem('ichat_messages', JSON.stringify(updatedMessages));
-            onRestoreCompleted(chats, updatedMessages);
-          }
-        }
-      ]
-    );
+    Alert.alert('Delete File', `Delete "${msg.media.filename}" to free storage?`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: async () => {
+        await FileSystem.deleteAsync(`${FileSystem.documentDirectory}${msg.media.filename}`, { idempotent: true });
+        const updated = messages.map(m => m.id === msg.id ? { ...m, body: `[Deleted: ${msg.media.filename}]`, media: null } : m);
+        await AsyncStorage.setItem('ichat_messages', JSON.stringify(updated));
+        onRestoreCompleted(chats, updated);
+      }}
+    ]);
   }
 
   async function handleDeleteSpecificChat(chatUsername) {
-    Alert.alert(
-      'Clear Chat Data',
-      `Delete all messages and media files for conversation with @${chatUsername}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Clear Chat',
-          style: 'destructive',
-          onPress: async () => {
-            const chatMsgs = messages.filter(m => m.chatPartner === chatUsername);
-            
-            // Delete media files from Document Directory
-            for (const m of chatMsgs) {
-              if (m.media) {
-                const localPath = `${FileSystem.documentDirectory}${m.media.filename}`;
-                await FileSystem.deleteAsync(localPath, { idempotent: true });
-              }
-            }
-
-            // Remove messages for this partner
-            const updatedMessages = messages.filter(m => m.chatPartner !== chatUsername);
-            await AsyncStorage.setItem('ichat_messages', JSON.stringify(updatedMessages));
-            
-            onRestoreCompleted(chats, updatedMessages);
-          }
+    Alert.alert('Clear Chat Data', `Delete all messages for @${chatUsername}?`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Clear Chat', style: 'destructive', onPress: async () => {
+        const chatMsgs = messages.filter(m => m.chatPartner === chatUsername);
+        for (const m of chatMsgs) {
+          if (m.media) await FileSystem.deleteAsync(`${FileSystem.documentDirectory}${m.media.filename}`, { idempotent: true });
         }
-      ]
-    );
+        const updated = messages.filter(m => m.chatPartner !== chatUsername);
+        await AsyncStorage.setItem('ichat_messages', JSON.stringify(updated));
+        onRestoreCompleted(chats, updated);
+      }}
+    ]);
   }
 
   async function handleClearMedia() {
-    Alert.alert(
-      'Clear Media Cache',
-      'Are you sure you want to delete all decrypted media files from this phone? Message logs will be kept.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Clear',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const files = await FileSystem.readDirectoryAsync(FileSystem.documentDirectory);
-              for (const filename of files) {
-                await FileSystem.deleteAsync(`${FileSystem.documentDirectory}${filename}`, { idempotent: true });
-              }
-              await calculateStorageSizes();
-              Alert.alert('Success', 'Media cache successfully cleared.');
-            } catch (err) {
-              Alert.alert('Error', 'Failed to clear media cache');
-            }
-          }
-        }
-      ]
-    );
+    Alert.alert('Clear Media Cache', 'Delete all decrypted media from this phone? Message logs will be kept.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Clear', style: 'destructive', onPress: async () => {
+        try {
+          const files = await FileSystem.readDirectoryAsync(FileSystem.documentDirectory);
+          for (const f of files) await FileSystem.deleteAsync(`${FileSystem.documentDirectory}${f}`, { idempotent: true });
+          await calculateStorageSizes();
+          Alert.alert('Done', 'Media cache cleared.');
+        } catch (e) { Alert.alert('Error', 'Failed to clear media.'); }
+      }}
+    ]);
   }
 
   async function handleClearHistory() {
-    Alert.alert(
-      'Clear Chat History',
-      'This will permanently delete all chat logs and credentials locally. Are you sure?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Clear All',
-          style: 'destructive',
-          onPress: async () => {
-            await AsyncStorage.removeItem('ichat_chats');
-            await AsyncStorage.removeItem('ichat_messages');
-            
-            const files = await FileSystem.readDirectoryAsync(FileSystem.documentDirectory);
-            for (const filename of files) {
-              await FileSystem.deleteAsync(`${FileSystem.documentDirectory}${filename}`, { idempotent: true });
-            }
-
-            onRestoreCompleted([], []);
-            Alert.alert('Wiped', 'Local databases cleared.');
-          }
-        }
-      ]
-    );
-  }
-
-  async function handleBackup() {
-    await handleExportLocalBackup();
-  }
-
-  async function handleRestore() {
-    await handleImportLocalBackup();
+    Alert.alert('Clear Chat History', 'Permanently delete all local chat logs and credentials?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Clear All', style: 'destructive', onPress: async () => {
+        await AsyncStorage.removeItem('ichat_chats');
+        await AsyncStorage.removeItem('ichat_messages');
+        const files = await FileSystem.readDirectoryAsync(FileSystem.documentDirectory);
+        for (const f of files) await FileSystem.deleteAsync(`${FileSystem.documentDirectory}${f}`, { idempotent: true });
+        onRestoreCompleted([], []);
+        Alert.alert('Wiped', 'Local databases cleared.');
+      }}
+    ]);
   }
 
   async function handleExportLocalBackup() {
     if (!backupPass || backupPass.length < 4) {
-      Alert.alert('Error', 'Please enter a backup password (at least 4 characters) in the Upload field first');
+      Alert.alert('Error', 'Enter a backup password (at least 4 characters).');
       return;
     }
-
     setLoading(true);
     try {
       const pub = await AsyncStorage.getItem('ichat_identity_key_public');
       const priv = await AsyncStorage.getItem('ichat_identity_key_private');
-
-      const payloadObject = {
-        chats,
-        messages,
-        keys: { publicKey: pub, privateKey: priv }
-      };
-
-      const salt = user.email;
-      const keyBytes = pbkdf2Sync(backupPass, salt, 2000, 32);
-      const encrypted = encryptSymmetric(JSON.stringify(payloadObject), keyBytes);
-      const backupBlobString = JSON.stringify(encrypted);
-
+      const payload = { chats, messages, keys: { publicKey: pub, privateKey: priv } };
+      const keyBytes = pbkdf2Sync(backupPass, user.email, 2000, 32);
+      const encrypted = encryptSymmetric(JSON.stringify(payload), keyBytes);
       const fileUri = `${FileSystem.cacheDirectory}ichat_backup_${new Date().toISOString().slice(0, 10)}.json`;
-      await FileSystem.writeAsStringAsync(fileUri, backupBlobString, { encoding: FileSystem.EncodingType.UTF8 });
-
+      await FileSystem.writeAsStringAsync(fileUri, JSON.stringify(encrypted), { encoding: FileSystem.EncodingType.UTF8 });
       if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri, { mimeType: 'application/json', dialogTitle: 'Save Backup File (Google Drive / Files)' });
+        await Sharing.shareAsync(fileUri, { mimeType: 'application/json', dialogTitle: 'Save Backup File' });
       } else {
-        Alert.alert('Exported', `Backup file saved to cache: ${fileUri}`);
+        Alert.alert('Exported', `Backup saved to: ${fileUri}`);
       }
-    } catch (err) {
-      Alert.alert('Export failed', err.message);
-    } finally {
-      setLoading(false);
-    }
+    } catch (err) { Alert.alert('Export failed', err.message); }
+    finally { setLoading(false); }
   }
 
   async function handleImportLocalBackup() {
-    if (!restorePass) {
-      Alert.alert('Error', 'Please enter your backup password in the Restore field first');
-      return;
-    }
-
+    if (!restorePass) { Alert.alert('Error', 'Enter your backup password first.'); return; }
     setLoading(true);
     try {
       const result = await DocumentPicker.getDocumentAsync({ type: '*/*' });
-      if (result.canceled || !result.assets || result.assets.length === 0) {
-        setLoading(false);
-        return;
-      }
-
-      const fileUri = result.assets[0].uri;
-      const backupBlobString = await FileSystem.readAsStringAsync(fileUri, { encoding: FileSystem.EncodingType.UTF8 });
-      const encryptedBlob = JSON.parse(backupBlobString);
-
-      const salt = user.email;
-      const keyBytes = pbkdf2Sync(restorePass, salt, 2000, 32);
-
-      const decryptedStr = decryptSymmetric(encryptedBlob.ciphertext, encryptedBlob.nonce, keyBytes);
-      const restored = JSON.parse(decryptedStr);
-
-      await AsyncStorage.setItem('ichat_identity_key_public', restored.keys.publicKey);
-      await AsyncStorage.setItem('ichat_identity_key_private', restored.keys.privateKey);
-      await AsyncStorage.setItem('ichat_chats', JSON.stringify(restored.chats));
-      await AsyncStorage.setItem('ichat_messages', JSON.stringify(restored.messages));
-
-      onRestoreCompleted(restored.chats, restored.messages);
+      if (result.canceled || !result.assets?.length) { setLoading(false); return; }
+      const content = await FileSystem.readAsStringAsync(result.assets[0].uri, { encoding: FileSystem.EncodingType.UTF8 });
+      const blob = JSON.parse(content);
+      const keyBytes = pbkdf2Sync(restorePass, user.email, 2000, 32);
+      const decrypted = JSON.parse(decryptSymmetric(blob.ciphertext, blob.nonce, keyBytes));
+      await AsyncStorage.setItem('ichat_identity_key_public', decrypted.keys.publicKey);
+      await AsyncStorage.setItem('ichat_identity_key_private', decrypted.keys.privateKey);
+      await AsyncStorage.setItem('ichat_chats', JSON.stringify(decrypted.chats));
+      await AsyncStorage.setItem('ichat_messages', JSON.stringify(decrypted.messages));
+      onRestoreCompleted(decrypted.chats, decrypted.messages);
       setRestorePass('');
-      Alert.alert('Success', 'Chat history and keys successfully restored from file!');
-    } catch (err) {
-      Alert.alert('Import failed', 'Decryption password mismatched or invalid file format.');
-    } finally {
-      setLoading(false);
-    }
+      Alert.alert('Success', 'Chat history and keys restored!');
+    } catch (err) { Alert.alert('Import failed', 'Wrong password or invalid file.'); }
+    finally { setLoading(false); }
+  }
+
+  async function handleLogoutAllDevices() {
+    Alert.alert('Logout from All Devices', 'This signs you out from ALL devices. You will need to log in again.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Logout All', style: 'destructive', onPress: async () => {
+        setLoading(true);
+        try {
+          const res = await fetch(`${serverUrl}/api/auth/logout-all-devices`, {
+            method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Failed');
+          await AsyncStorage.clear();
+          onLogout();
+        } catch (err) { Alert.alert('Error', err.message); }
+        finally { setLoading(false); }
+      }}
+    ]);
   }
 
   async function handleDeleteAccount() {
-    Alert.alert(
-      'Danger Zone',
-      'Permanently delete your profile, active devices, and cloud backups from the server? This cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            setLoading(true);
-            try {
-              const res = await fetch(`${serverUrl}/api/auth/delete-account`, {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}` }
-              });
-              const data = await res.json();
-              if (!res.ok) throw new Error(data.error || 'Account deletion failed');
-
-              await AsyncStorage.clear();
-              const files = await FileSystem.readDirectoryAsync(FileSystem.documentDirectory);
-              for (const filename of files) {
-                await FileSystem.deleteAsync(`${FileSystem.documentDirectory}${filename}`, { idempotent: true });
-              }
-
-              onLogout();
-            } catch (err) {
-              Alert.alert('Error', err.message);
-            } finally {
-              setLoading(false);
-            }
-          }
-        }
-      ]
-    );
+    Alert.alert('Danger Zone', 'Permanently delete your account? This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: async () => {
+        setLoading(true);
+        try {
+          const res = await fetch(`${serverUrl}/api/auth/delete-account`, {
+            method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Deletion failed');
+          await AsyncStorage.clear();
+          const files = await FileSystem.readDirectoryAsync(FileSystem.documentDirectory);
+          for (const f of files) await FileSystem.deleteAsync(`${FileSystem.documentDirectory}${f}`, { idempotent: true });
+          onLogout();
+        } catch (err) { Alert.alert('Error', err.message); }
+        finally { setLoading(false); }
+      }}
+    ]);
   }
 
+  // ── Helpers ──
+  const SectionHead = ({ icon, title }) => (
+    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+      <Ionicons name={icon} size={20} color={C.accent} />
+      <Text style={{ color: C.text, fontWeight: '700', fontSize: 15, marginLeft: 8 }}>{title}</Text>
+    </View>
+  );
+
+  const Card = ({ children, style }) => (
+    <View style={[{ backgroundColor: C.card, borderWidth: 1, borderColor: C.border, borderRadius: 14, padding: 16, marginBottom: 10 }, style]}>
+      {children}
+    </View>
+  );
+
+  const themeLabels = { system: 'System', light: 'Light', dark: 'Dark' };
+
   return (
-    <ScrollView style={styles.container}>
-      {/* Profile Header */}
-      <View style={styles.profileHeader}>
-        <View style={styles.largeAvatar}>
-          <Text style={styles.largeAvatarText}>{user?.username?.substring(0, 2).toUpperCase()}</Text>
-        </View>
-        <Text style={styles.profileUsername}>@{user?.username}</Text>
-        <Text style={styles.profileEmail}>{user?.email}</Text>
+    <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }}>
+      <StatusBar barStyle={C.isDark ? 'light-content' : 'dark-content'} backgroundColor={C.bg} />
+
+      {/* ── HEADER ── */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, backgroundColor: C.bg, borderBottomWidth: 1, borderBottomColor: C.border }}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 20, backgroundColor: C.cardAlt }}>
+          <Ionicons name="arrow-back" size={20} color={C.text} />
+        </TouchableOpacity>
+        <Text style={{ fontSize: 18, fontWeight: '700', color: C.text }}>Settings</Text>
+        <View style={{ width: 40 }} />
       </View>
 
-      {/* Theme Section */}
-      <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <Ionicons name="color-palette-outline" size={20} color="#00f2fe" />
-          <Text style={styles.sectionTitle}>Appearance</Text>
-        </View>
-        <View style={styles.themeGrid}>
-          {['system', 'light', 'dark'].map((mode) => (
-            <TouchableOpacity 
-              key={mode} 
-              style={[styles.themeBtn, themeMode === mode && styles.themeBtnActive]}
-              onPress={() => {
-                setThemeMode(mode);
-                onThemeChange(mode);
-              }}
-            >
-              <Text style={[styles.themeText, themeMode === mode && styles.themeTextActive]}>
-                {mode === 'system' ? 'System' : (mode === 'light' ? 'Light' : 'Dark')}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </View>
+      <ScrollView style={{ flex: 1, backgroundColor: C.bg }} contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
 
-      {/* Storage Management Section */}
-      <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <Ionicons name="server-outline" size={20} color="#00f2fe" />
-          <Text style={styles.sectionTitle}>Storage Management</Text>
+        {/* ── PROFILE HEADER ── */}
+        <View style={{ alignItems: 'center', paddingVertical: 24, borderBottomWidth: 1, borderBottomColor: C.border, marginBottom: 20 }}>
+          <View style={{ width: 80, height: 80, borderRadius: 40, backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
+            <Text style={{ color: C.isDark ? '#0c101a' : '#ffffff', fontWeight: '800', fontSize: 28 }}>{user?.username?.substring(0, 2).toUpperCase()}</Text>
+          </View>
+          <Text style={{ color: C.text, fontWeight: '700', fontSize: 20 }}>@{user?.username}</Text>
+          <Text style={{ color: C.textMuted, fontSize: 13, marginTop: 4 }}>{user?.email}</Text>
         </View>
-        <View style={styles.statCard}>
-          <View style={styles.statRow}>
-            <Text style={styles.statLabel}>Message Logs Database Size</Text>
-            <Text style={styles.statValue}>{textStorageSize}</Text>
-          </View>
-          <View style={styles.statRow}>
-            <Text style={styles.statLabel}>Downloaded Media Cache Size</Text>
-            <Text style={styles.statValue}>{mediaStorageSize}</Text>
-          </View>
-          <View style={styles.actionRow}>
-            <TouchableOpacity style={styles.smallOutlineBtn} onPress={handleClearMedia}>
-              <Ionicons name="trash-bin-outline" size={14} color="#fff" />
-              <Text style={styles.btnTextSmall}>Clear Cached Media</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.smallOutlineBtn, styles.dangerBorder]} onPress={handleClearHistory}>
-              <Ionicons name="trash-outline" size={14} color="#f56565" />
-              <Text style={[styles.btnTextSmall, {color: '#f56565'}]}>Wipe History</Text>
-            </TouchableOpacity>
-          </View>
 
-          {/* Per-Chat Storage Explorer */}
-          <View style={styles.perChatSection}>
-            <Text style={styles.perChatTitle}>Storage by Chat (Largest First)</Text>
-            {chatStorageList.length === 0 ? (
-              <Text style={styles.noChatsText}>No chats stored</Text>
-            ) : (
-              chatStorageList.map((item) => {
-                const isExpanded = !!expandedChats[item.username];
-                const formattedSize = item.totalBytes > 1024 * 1024 
-                  ? (item.totalBytes / (1024 * 1024)).toFixed(2) + ' MB'
-                  : (item.totalBytes / 1024).toFixed(1) + ' KB';
+        {/* ── APPEARANCE ── */}
+        <View style={{ marginBottom: 24 }}>
+          <SectionHead icon="color-palette-outline" title="Appearance" />
+          <View style={{ flexDirection: 'row', backgroundColor: C.bgSecondary, borderWidth: 1, borderColor: C.border, borderRadius: 12, padding: 4 }}>
+            {['system', 'light', 'dark'].map(mode => (
+              <TouchableOpacity
+                key={mode}
+                style={{ flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 8, backgroundColor: selectedTheme === mode ? C.accent : 'transparent' }}
+                onPress={() => changeTheme(mode)}
+              >
+                <Text style={{ color: selectedTheme === mode ? (C.isDark ? '#0c101a' : '#ffffff') : C.textMuted, fontSize: 13, fontWeight: '600' }}>
+                  {themeLabels[mode]}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
 
-                return (
-                  <View key={item.username} style={styles.chatStorageCard}>
-                    <View style={styles.chatStorageHeader}>
-                      <View style={{flex: 1}}>
-                        <Text style={styles.chatStorageUser}>@{item.username}</Text>
-                        <Text style={styles.chatStorageMeta}>{formattedSize} • {item.mediaFiles.length} files</Text>
+        {/* ── STORAGE MANAGEMENT ── */}
+        <View style={{ marginBottom: 24 }}>
+          <SectionHead icon="server-outline" title="Storage Management" />
+          <Card>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6 }}>
+              <Text style={{ color: C.textMuted, fontSize: 13 }}>Message Logs</Text>
+              <Text style={{ color: C.text, fontWeight: '600', fontSize: 13 }}>{textStorageSize}</Text>
+            </View>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: C.border, marginBottom: 12 }}>
+              <Text style={{ color: C.textMuted, fontSize: 13 }}>Media Cache</Text>
+              <Text style={{ color: C.text, fontWeight: '600', fontSize: 13 }}>{mediaStorageSize}</Text>
+            </View>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <TouchableOpacity style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: C.cardAlt, borderWidth: 1, borderColor: C.border, borderRadius: 8, paddingVertical: 9 }} onPress={handleClearMedia}>
+                <Ionicons name="trash-bin-outline" size={14} color={C.textMuted} />
+                <Text style={{ color: C.textMuted, fontSize: 12, fontWeight: '600' }}>Clear Media</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: 'rgba(239,68,68,0.08)', borderWidth: 1, borderColor: 'rgba(239,68,68,0.3)', borderRadius: 8, paddingVertical: 9 }} onPress={handleClearHistory}>
+                <Ionicons name="trash-outline" size={14} color="#ef4444" />
+                <Text style={{ color: '#ef4444', fontSize: 12, fontWeight: '600' }}>Wipe History</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Per-Chat Storage */}
+            <View style={{ marginTop: 16 }}>
+              <Text style={{ color: C.textMuted, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', marginBottom: 10 }}>Storage by Chat</Text>
+              {chatStorageList.length === 0
+                ? <Text style={{ color: C.textFaint, fontSize: 13, textAlign: 'center', paddingVertical: 8 }}>No chats stored</Text>
+                : chatStorageList.map(item => {
+                  const isExpanded = !!expandedChats[item.username];
+                  const size = item.totalBytes > 1048576
+                    ? `${(item.totalBytes / 1048576).toFixed(2)} MB`
+                    : `${(item.totalBytes / 1024).toFixed(1)} KB`;
+                  return (
+                    <View key={item.username} style={{ marginBottom: 8, backgroundColor: C.cardAlt, borderRadius: 10, padding: 10 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ color: C.text, fontWeight: '600', fontSize: 13 }}>@{item.username}</Text>
+                          <Text style={{ color: C.textFaint, fontSize: 11, marginTop: 2 }}>{size} · {item.mediaFiles.length} files</Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', gap: 6 }}>
+                          <TouchableOpacity style={{ width: 30, height: 30, backgroundColor: C.accentBg, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }} onPress={() => setExpandedChats(p => ({ ...p, [item.username]: !isExpanded }))}>
+                            <Ionicons name={isExpanded ? 'chevron-up' : 'folder-open-outline'} size={14} color={C.accent} />
+                          </TouchableOpacity>
+                          <TouchableOpacity style={{ width: 30, height: 30, backgroundColor: 'rgba(239,68,68,0.1)', borderRadius: 8, alignItems: 'center', justifyContent: 'center' }} onPress={() => handleDeleteSpecificChat(item.username)}>
+                            <Ionicons name="trash-outline" size={14} color="#ef4444" />
+                          </TouchableOpacity>
+                        </View>
                       </View>
-                      <View style={styles.chatStorageBtns}>
-                        <TouchableOpacity 
-                          style={styles.iconActionBtn}
-                          onPress={() => setExpandedChats(prev => ({ ...prev, [item.username]: !isExpanded }))}
-                        >
-                          <Ionicons name={isExpanded ? "chevron-up" : "folder-open-outline"} size={16} color="#00f2fe" />
-                        </TouchableOpacity>
-                        <TouchableOpacity 
-                          style={[styles.iconActionBtn, {backgroundColor: 'rgba(245,101,101,0.1)'}]}
-                          onPress={() => handleDeleteSpecificChat(item.username)}
-                        >
-                          <Ionicons name="trash-outline" size={16} color="#f56565" />
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-
-                    {/* Files Sub-list */}
-                    {isExpanded && (
-                      <View style={styles.fileListSub}>
-                        {item.mediaFiles.length === 0 ? (
-                          <Text style={styles.noFilesText}>No shared media files</Text>
-                        ) : (
-                          item.mediaFiles.map((m) => (
-                            <View key={m.id} style={styles.fileRow}>
-                              <Ionicons name="document-text-outline" size={14} color="#718096" />
-                              <View style={styles.fileRowInfo}>
-                                <Text style={styles.fileRowName} numberOfLines={1}>{m.media.filename}</Text>
-                                <Text style={styles.fileRowSize}>{(m.media.size / 1024).toFixed(1)} KB</Text>
+                      {isExpanded && (
+                        <View style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: C.border, paddingTop: 8 }}>
+                          {item.mediaFiles.length === 0
+                            ? <Text style={{ color: C.textFaint, fontSize: 11, textAlign: 'center' }}>No media files</Text>
+                            : item.mediaFiles.map(m => (
+                              <View key={m.id} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 5 }}>
+                                <Ionicons name="document-text-outline" size={13} color={C.textFaint} />
+                                <View style={{ flex: 1, marginLeft: 8 }}>
+                                  <Text style={{ color: C.textSub, fontSize: 12 }} numberOfLines={1}>{m.media.filename}</Text>
+                                  <Text style={{ color: C.textFaint, fontSize: 10 }}>{(m.media.size / 1024).toFixed(1)} KB</Text>
+                                </View>
+                                <TouchableOpacity onPress={() => handleDeleteFile(item.username, m)}>
+                                  <Ionicons name="trash-bin-outline" size={15} color="#ef4444" />
+                                </TouchableOpacity>
                               </View>
-                              <TouchableOpacity onPress={() => handleDeleteFile(item.username, m)}>
-                                <Ionicons name="trash-bin-outline" size={16} color="#f56565" />
-                              </TouchableOpacity>
-                            </View>
-                          ))
-                        )}
-                      </View>
-                    )}
-                  </View>
-                );
-              })
+                            ))}
+                        </View>
+                      )}
+                    </View>
+                  );
+                })}
+            </View>
+          </Card>
+        </View>
+
+        {/* ── BACKUP & RESTORE ── */}
+        <View style={{ marginBottom: 24 }}>
+          <SectionHead icon="cloud-upload-outline" title="Backup & Restore" />
+
+          {/* Schedule */}
+          <View style={{ marginBottom: 12 }}>
+            <Text style={{ color: C.textMuted, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', marginBottom: 8 }}>Auto Backup Schedule</Text>
+            <View style={{ flexDirection: 'row', backgroundColor: C.bgSecondary, borderWidth: 1, borderColor: C.border, borderRadius: 10, padding: 4 }}>
+              {[['never', 'Manual'], ['daily', 'Daily']].map(([val, label]) => (
+                <TouchableOpacity key={val} style={{ flex: 1, paddingVertical: 9, alignItems: 'center', borderRadius: 8, backgroundColor: backupSchedule === val ? C.accent : 'transparent' }} onPress={() => handleScheduleChange(val)}>
+                  <Text style={{ color: backupSchedule === val ? (C.isDark ? '#0c101a' : '#fff') : C.textMuted, fontWeight: '600', fontSize: 13 }}>{label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          {/* Export */}
+          <Card>
+            <Text style={{ color: C.text, fontWeight: '600', fontSize: 14, marginBottom: 10 }}>Export Encrypted Backup</Text>
+            <TextInput style={{ backgroundColor: C.input, borderWidth: 1, borderColor: C.inputBorder, borderRadius: 8, color: C.text, padding: 10, fontSize: 13, marginBottom: 10 }} secureTextEntry value={backupPass} onChangeText={setBackupPass} placeholder="Set backup passcode" placeholderTextColor={C.textFaint} />
+            <TouchableOpacity style={{ backgroundColor: C.accent, borderRadius: 8, padding: 12, alignItems: 'center' }} onPress={handleExportLocalBackup} disabled={loading}>
+              <Text style={{ color: C.isDark ? '#0c101a' : '#ffffff', fontWeight: '700', fontSize: 13 }}>📤 Share Encrypted File</Text>
+            </TouchableOpacity>
+          </Card>
+
+          {/* Import */}
+          <Card>
+            <Text style={{ color: C.text, fontWeight: '600', fontSize: 14, marginBottom: 10 }}>Import Backup File</Text>
+            <TextInput style={{ backgroundColor: C.input, borderWidth: 1, borderColor: C.inputBorder, borderRadius: 8, color: C.text, padding: 10, fontSize: 13, marginBottom: 10 }} secureTextEntry value={restorePass} onChangeText={setRestorePass} placeholder="Enter backup passcode" placeholderTextColor={C.textFaint} />
+            <TouchableOpacity style={{ backgroundColor: C.cardAlt, borderWidth: 1, borderColor: C.borderStrong, borderRadius: 8, padding: 12, alignItems: 'center' }} onPress={handleImportLocalBackup} disabled={loading}>
+              <Text style={{ color: C.text, fontWeight: '700', fontSize: 13 }}>📥 Import from File</Text>
+            </TouchableOpacity>
+          </Card>
+
+          <Text style={{ color: C.textFaint, fontSize: 11, textAlign: 'center', marginTop: 4 }}>Last Backup: {backupStatus}</Text>
+        </View>
+
+        {/* ── SESSIONS & ACCOUNT ── */}
+        <View style={{ marginBottom: 40 }}>
+          <SectionHead icon="shield-outline" title="Sessions & Account" />
+
+          <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: C.cardAlt, borderWidth: 1, borderColor: C.border, borderRadius: 12, padding: 16, marginBottom: 10 }} onPress={onLogout}>
+            <Ionicons name="log-out-outline" size={20} color={C.text} />
+            <Text style={{ color: C.text, fontWeight: '600', fontSize: 14 }}>Log Out (This Device)</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: 'rgba(217,119,6,0.12)', borderWidth: 1, borderColor: '#d97706', borderRadius: 12, padding: 16, marginBottom: 10 }} onPress={handleLogoutAllDevices} disabled={loading}>
+            {loading ? <ActivityIndicator color="#d97706" /> : (
+              <>
+                <Ionicons name="phone-portrait-outline" size={20} color="#d97706" />
+                <Text style={{ color: '#d97706', fontWeight: '600', fontSize: 14 }}>Logout from All Sessions</Text>
+              </>
             )}
-          </View>
+          </TouchableOpacity>
 
-        </View>
-      </View>
-
-      {/* Backup & Restoration Section */}
-      <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <Ionicons name="cloud-upload-outline" size={20} color="#00f2fe" />
-          <Text style={styles.sectionTitle}>Google Drive Backup & Schedule</Text>
-        </View>
-
-        {/* Schedule Selector */}
-        <View style={{ marginBottom: 16 }}>
-          <Text style={{ color: '#a0aec0', fontSize: 12, fontWeight: '700', marginBottom: 8, textTransform: 'uppercase' }}>Automated Backup Schedule</Text>
-          <View style={styles.themeGrid}>
-            <TouchableOpacity 
-              style={[styles.themeBtn, backupSchedule === 'never' && styles.themeBtnActive]}
-              onPress={() => handleScheduleChange('never')}
-            >
-              <Text style={[styles.themeText, backupSchedule === 'never' && styles.themeTextActive]}>Never (Manual)</Text>
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={[styles.themeBtn, backupSchedule === 'daily' && styles.themeBtnActive]}
-              onPress={() => handleScheduleChange('daily')}
-            >
-              <Text style={[styles.themeText, backupSchedule === 'daily' && styles.themeTextActive]}>Daily (24h)</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <View style={styles.backupCard}>
-          <Text style={styles.backupTitle}>Upload to Google Drive</Text>
-          <TextInput
-            style={styles.backupInput}
-            secureTextEntry
-            value={backupPass}
-            onChangeText={setBackupPass}
-            placeholder="Set backup passcode (E2EE)"
-            placeholderTextColor="#718096"
-          />
-          <TouchableOpacity style={styles.backupBtn} onPress={handleBackup} disabled={loading}>
-            <Text style={styles.backupBtnText}>Encrypt & Upload</Text>
+          <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: 'rgba(239,68,68,0.12)', borderWidth: 1, borderColor: '#ef4444', borderRadius: 12, padding: 16 }} onPress={handleDeleteAccount} disabled={loading}>
+            {loading ? <ActivityIndicator color="#ef4444" /> : (
+              <>
+                <Ionicons name="trash-outline" size={20} color="#ef4444" />
+                <Text style={{ color: '#ef4444', fontWeight: '600', fontSize: 14 }}>Delete & Wipe Account</Text>
+              </>
+            )}
           </TouchableOpacity>
         </View>
 
-        <View style={styles.backupCard}>
-          <Text style={styles.backupTitle}>Restore from Google Drive</Text>
-          <TextInput
-            style={styles.backupInput}
-            secureTextEntry
-            value={restorePass}
-            onChangeText={setRestorePass}
-            placeholder="Enter backup passcode"
-            placeholderTextColor="#718096"
-          />
-          <TouchableOpacity style={[styles.backupBtn, {backgroundColor: '#1a202c', borderWidth: 1, borderColor: '#4a5568'}]} onPress={handleRestore} disabled={loading}>
-            <Text style={[styles.backupBtnText, {color: '#fff'}]}>Download & Decrypt</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Local Encrypted Backup File Export & Import */}
-        <View style={styles.backupCard}>
-          <Text style={styles.backupTitle}>Export / Import Encrypted File</Text>
-          <Text style={{ color: '#a0aec0', fontSize: 11, marginBottom: 10 }}>Share backup file to Google Drive, Files, or cloud app, or import an existing backup file.</Text>
-          <View style={{ flexDirection: 'row', gap: 10 }}>
-            <TouchableOpacity style={[styles.backupBtn, { flex: 1, backgroundColor: '#1a202c', borderWidth: 1, borderColor: '#00f2fe' }]} onPress={handleExportLocalBackup} disabled={loading}>
-              <Text style={[styles.backupBtnText, { color: '#00f2fe' }]}>Share File</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.backupBtn, { flex: 1, backgroundColor: '#1a202c', borderWidth: 1, borderColor: '#a0aec0' }]} onPress={handleImportLocalBackup} disabled={loading}>
-              <Text style={[styles.backupBtnText, { color: '#fff' }]}>Import File</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <Text style={styles.backupStatus}>Last Backup Uploaded: {backupStatus}</Text>
-      </View>
-
-      {/* Logout & Danger Zone Section */}
-      <View style={[styles.section, {marginBottom: 40}]}>
-        <TouchableOpacity style={styles.logoutBtn} onPress={onLogout}>
-          <Ionicons name="log-out-outline" size={20} color="#fff" />
-          <Text style={styles.logoutBtnText}>Log Out from Session</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.deleteBtn} onPress={handleDeleteAccount} disabled={loading}>
-          {loading ? <ActivityIndicator color="#fff" /> : (
-            <>
-              <Ionicons name="trash-outline" size={20} color="#fff" />
-              <Text style={styles.deleteBtnText}>Delete & Wipe Account</Text>
-            </>
-          )}
-        </TouchableOpacity>
-      </View>
-    </ScrollView>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0c101a',
-    padding: 16,
-  },
-  profileHeader: {
-    alignItems: 'center',
-    paddingVertical: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.05)',
-    marginBottom: 20,
-  },
-  largeAvatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#00f2fe',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 12,
-  },
-  largeAvatarText: {
-    color: '#0c101a',
-    fontWeight: '800',
-    fontSize: 28,
-  },
-  profileUsername: {
-    color: '#fff',
-    fontWeight: '700',
-    fontSize: 20,
-  },
-  profileEmail: {
-    color: '#718096',
-    fontSize: 13,
-    marginTop: 4,
-  },
-  section: {
-    marginBottom: 24,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  sectionTitle: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 15,
-    marginLeft: 8,
-  },
-  themeGrid: {
-    flexDirection: 'row',
-    backgroundColor: '#06080d',
-    borderWidth: 1,
-    borderColor: '#2d3748',
-    borderRadius: 12,
-    padding: 4,
-  },
-  themeBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    alignItems: 'center',
-    borderRadius: 8,
-  },
-  themeBtnActive: {
-    backgroundColor: '#00f2fe',
-  },
-  themeText: {
-    color: '#718096',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  themeTextActive: {
-    color: '#0c101a',
-  },
-  statCard: {
-    backgroundColor: '#161c2d',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-    borderRadius: 14,
-    padding: 16,
-  },
-  statRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 6,
-  },
-  statLabel: {
-    color: '#a0aec0',
-    fontSize: 13,
-  },
-  statValue: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 13,
-  },
-  actionRow: {
-    flexDirection: 'row',
-    marginTop: 14,
-    gap: 10,
-  },
-  smallOutlineBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#4a5568',
-    borderRadius: 8,
-    paddingVertical: 8,
-    gap: 6,
-  },
-  dangerBorder: {
-    borderColor: 'rgba(245,101,101,0.2)',
-  },
-  btnTextSmall: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  perChatSection: {
-    marginTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.06)',
-    paddingTop: 14,
-  },
-  perChatTitle: {
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: '700',
-    marginBottom: 10,
-  },
-  noChatsText: {
-    color: '#718096',
-    fontSize: 12,
-    textAlign: 'center',
-    paddingVertical: 8,
-  },
-  chatStorageCard: {
-    backgroundColor: '#06080d',
-    borderWidth: 1,
-    borderColor: '#2d3748',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 8,
-  },
-  chatStorageHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  chatStorageUser: {
-    color: '#fff',
-    fontWeight: '700',
-    fontSize: 13.5,
-  },
-  chatStorageMeta: {
-    color: '#718096',
-    fontSize: 11,
-    marginTop: 2,
-  },
-  chatStorageBtns: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  iconActionBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 6,
-    backgroundColor: '#161c2d',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  fileListSub: {
-    marginTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: '#1a202c',
-    paddingTop: 8,
-  },
-  noFilesText: {
-    color: '#718096',
-    fontSize: 11,
-    textAlign: 'center',
-  },
-  fileRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.04)',
-  },
-  fileRowInfo: {
-    flex: 1,
-    marginLeft: 8,
-    marginRight: 8,
-  },
-  fileRowName: {
-    color: '#e2e8f0',
-    fontSize: 12,
-  },
-  fileRowSize: {
-    color: '#718096',
-    fontSize: 10,
-  },
-  backupCard: {
-    backgroundColor: '#161c2d',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 10,
-  },
-  backupTitle: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 14,
-    marginBottom: 10,
-  },
-  backupInput: {
-    backgroundColor: '#06080d',
-    borderWidth: 1,
-    borderColor: '#2d3748',
-    borderRadius: 8,
-    color: '#fff',
-    padding: 10,
-    fontSize: 13,
-    marginBottom: 12,
-  },
-  backupBtn: {
-    backgroundColor: '#00f2fe',
-    borderRadius: 8,
-    padding: 12,
-    alignItems: 'center',
-  },
-  backupBtnText: {
-    color: '#0c101a',
-    fontWeight: '700',
-    fontSize: 13,
-  },
-  backupStatus: {
-    color: '#718096',
-    fontSize: 11,
-    textAlign: 'center',
-    marginTop: 6,
-  },
-  logoutBtn: {
-    backgroundColor: '#2d3748',
-    borderRadius: 12,
-    padding: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    marginBottom: 10,
-  },
-  logoutBtnText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  deleteBtn: {
-    backgroundColor: '#e53e3e',
-    borderRadius: 12,
-    padding: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  deleteBtnText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 14,
-  }
-});
+const styles = StyleSheet.create({});

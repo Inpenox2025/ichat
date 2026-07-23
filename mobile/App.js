@@ -2,10 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Ionicons } from '@expo/vector-icons';
+import { ThemeProvider } from './src/context/ThemeContext';
 
 // Import Screens
 import AuthScreen from './src/screens/AuthScreen';
@@ -21,106 +20,6 @@ import { decryptAsymmetric, decryptSymmetric, encryptAsymmetric, encryptSymmetri
 import { registerForPushNotificationsAsync, presentLocalNotification } from './src/services/notifications';
 
 const Stack = createNativeStackNavigator();
-const Tab = createBottomTabNavigator();
-
-// Bottom Tabs Navigator (Chats & Settings)
-function MainTabs({
-  chats,
-  groups,
-  messages,
-  activeTab,
-  onSwitchTab,
-  onSelectChat,
-  onSelectGroup,
-  onCreateGroup,
-  onDeleteSelectedChats,
-  onDeleteSelectedGroups,
-  onExitSelectedGroups,
-  onAcceptRequest,
-  onDeclineRequest,
-  onRestoreCompleted,
-  onLogout,
-  serverUrl,
-  token,
-  user,
-  selectedTheme,
-  onThemeChange
-}) {
-  return (
-    <Tab.Navigator
-      screenOptions={({ route }) => ({
-        tabBarIcon: ({ color, size }) => {
-          let iconName;
-          if (route.name === 'ChatsTab') {
-            iconName = 'chatbubbles-outline';
-          } else if (route.name === 'Settings') {
-            iconName = 'settings-outline';
-          }
-          return <Ionicons name={iconName} size={size} color={color} />;
-        },
-        tabBarActiveTintColor: '#38bdf8',
-        tabBarInactiveTintColor: '#718096',
-        tabBarStyle: {
-          backgroundColor: '#161c2d',
-          borderTopWidth: 1,
-          borderTopColor: 'rgba(255,255,255,0.06)',
-          height: 60,
-          paddingBottom: 8,
-          paddingTop: 8,
-        },
-        headerStyle: {
-          backgroundColor: '#161c2d',
-          borderBottomWidth: 1,
-          borderBottomColor: 'rgba(255,255,255,0.06)',
-        },
-        headerTitleStyle: {
-          color: '#fff',
-          fontWeight: '700',
-        },
-      })}
-    >
-      <Tab.Screen name="ChatsTab" options={{ title: 'Messages' }}>
-        {(props) => (
-          <ChatListScreen
-            {...props}
-            chats={chats}
-            groups={groups}
-            messages={messages}
-            activeTab={activeTab}
-            onSwitchTab={onSwitchTab}
-            onSelectChat={onSelectChat}
-            onSelectGroup={onSelectGroup}
-            onCreateGroup={onCreateGroup}
-            onDeleteSelectedChats={onDeleteSelectedChats}
-            onDeleteSelectedGroups={onDeleteSelectedGroups}
-            onExitSelectedGroups={onExitSelectedGroups}
-            onAcceptRequest={onAcceptRequest}
-            onDeclineRequest={onDeclineRequest}
-            serverUrl={serverUrl}
-            token={token}
-            currentUsername={user?.username}
-          />
-        )}
-      </Tab.Screen>
-      <Tab.Screen name="Settings">
-        {(props) => (
-          <SettingsScreen
-            {...props}
-            chats={chats}
-            messages={messages}
-            onRestoreCompleted={onRestoreCompleted}
-            onLogout={onLogout}
-            serverUrl={serverUrl}
-            token={token}
-            user={user}
-            selectedTheme={selectedTheme}
-            onThemeChange={onThemeChange}
-          />
-        )}
-      </Tab.Screen>
-    </Tab.Navigator>
-  );
-}
 
 export default function App() {
   const [token, setToken] = useState(null);
@@ -824,30 +723,23 @@ export default function App() {
   }
 
   return (
-    <SafeAreaProvider>
-      <StatusBar style="light" />
-      <NavigationContainer ref={navigationRef}>
-        {!token ? (
-          <AuthScreen onAuthSuccess={handleAuthSuccess} />
-        ) : (
-          <Stack.Navigator
-            screenOptions={{
-              headerStyle: {
-                backgroundColor: '#161c2d',
-              },
-              headerTintColor: '#fff',
-              headerTitleStyle: {
-                fontWeight: '700',
-              },
-              contentStyle: {
-                backgroundColor: '#0c101a',
-              }
-            }}
-          >
-            {/* Main bottom tabs */}
-            <Stack.Screen name="MainTabs" options={{ headerShown: false }}>
+    <ThemeProvider>
+      <SafeAreaProvider>
+        <StatusBar style="auto" />
+        <NavigationContainer ref={navigationRef}>
+          {!token ? (
+            <AuthScreen onAuthSuccess={handleAuthSuccess} />
+          ) : (
+            <Stack.Navigator
+              screenOptions={{
+                headerShown: false,
+                contentStyle: { backgroundColor: 'transparent' }
+              }}
+            >
+            {/* Main chat list with custom 4-tab bottom nav */}
+            <Stack.Screen name="MainHome">
               {(props) => (
-                <MainTabs
+                <ChatListScreen
                   {...props}
                   chats={chats}
                   groups={groups}
@@ -862,22 +754,32 @@ export default function App() {
                   onExitSelectedGroups={handleExitSelectedGroups}
                   onAcceptRequest={handleAcceptRequest}
                   onDeclineRequest={handleDeclineRequest}
+                  serverUrl={serverUrl}
+                  token={token}
+                  user={user}
+                  currentUsername={user?.username}
+                />
+              )}
+            </Stack.Screen>
+
+            {/* Settings screen - navigated to from ChatListScreen's Settings tab */}
+            <Stack.Screen name="Settings">
+              {(props) => (
+                <SettingsScreen
+                  {...props}
+                  chats={chats}
+                  messages={messages}
                   onRestoreCompleted={handleRestoreCompleted}
                   onLogout={handleLogout}
                   serverUrl={serverUrl}
                   token={token}
                   user={user}
-                  selectedTheme={theme}
-                  onThemeChange={(mode) => {
-                    setTheme(mode);
-                    AsyncStorage.setItem('ichat_theme', mode);
-                  }}
                 />
               )}
             </Stack.Screen>
 
             {/* Chat conversation view screen */}
-            <Stack.Screen name="Chat" options={{ headerShown: false }}>
+            <Stack.Screen name="Chat">
               {(props) => (
                 <ChatScreen
                   {...props}
@@ -897,7 +799,7 @@ export default function App() {
             </Stack.Screen>
 
             {/* Call Screen overlay */}
-            <Stack.Screen name="Call" options={{ headerShown: false }}>
+            <Stack.Screen name="Call">
               {(props) => (
                 <CallScreen
                   {...props}
@@ -907,21 +809,22 @@ export default function App() {
                 />
               )}
             </Stack.Screen>
-          </Stack.Navigator>
-        )}
+            </Stack.Navigator>
+          )}
 
-        {/* Global Group Details Modal */}
-        <GroupDetailsModal
-          visible={showGroupDetailsModal}
-          onClose={() => setShowGroupDetailsModal(false)}
-          group={groupDetailsGroup}
-          currentUser={user}
-          contacts={chats}
-          onAddMembers={handleAddMembersToGroup}
-          onExitGroup={handleExitGroup}
-          onDeleteGroup={handleDeleteGroup}
-        />
-      </NavigationContainer>
-    </SafeAreaProvider>
+          {/* Global Group Details Modal */}
+          <GroupDetailsModal
+            visible={showGroupDetailsModal}
+            onClose={() => setShowGroupDetailsModal(false)}
+            group={groupDetailsGroup}
+            currentUser={user}
+            contacts={chats}
+            onAddMembers={handleAddMembersToGroup}
+            onExitGroup={handleExitGroup}
+            onDeleteGroup={handleDeleteGroup}
+          />
+        </NavigationContainer>
+      </SafeAreaProvider>
+    </ThemeProvider>
   );
 }
