@@ -323,53 +323,84 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
   }
 
   async function handleLogoutAllDevices() {
-    Alert.alert('Logout from All Devices', 'This signs you out from ALL devices. You will need to log in again.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Logout All', style: 'destructive', onPress: async () => {
-        setActionLoading('logout-all');
-        try {
-          const res = await fetch(`${serverUrl}/api/auth/logout-all-devices?action=logout-all-devices`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify({ action: 'logout-all-devices' })
-          });
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error || 'Failed to logout all devices');
+    const doLogoutAll = async () => {
+      setActionLoading('logout-all');
+      try {
+        const res = await fetch(`${serverUrl}/api/auth/logout-all-devices?action=logout-all-devices`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ action: 'logout-all-devices' })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to logout all devices');
+        if (Platform.OS === 'web') {
+          window.alert('All device sessions have been revoked.');
+        } else {
           Alert.alert('Success', 'All device sessions have been revoked.');
-          await onLogout();
-        } catch (err) {
-          Alert.alert('Error', err.message);
-        } finally {
-          setActionLoading(null);
         }
-      }}
-    ]);
+        await onLogout();
+      } catch (err) {
+        if (Platform.OS === 'web') {
+          window.alert('Error: ' + err.message);
+        } else {
+          Alert.alert('Error', err.message);
+        }
+      } finally {
+        setActionLoading(null);
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm('Logout from All Devices?\n\nThis signs you out from ALL devices. You will need to log in again.')) {
+        await doLogoutAll();
+      }
+    } else {
+      Alert.alert('Logout from All Devices', 'This signs you out from ALL devices. You will need to log in again.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Logout All', style: 'destructive', onPress: doLogoutAll }
+      ]);
+    }
   }
 
   async function handleDeleteAccount() {
-    Alert.alert('Danger Zone', 'Permanently delete your account? This cannot be undone.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => {
-        setActionLoading('delete-account');
-        try {
-          const res = await fetch(`${serverUrl}/api/auth/delete-account`, {
-            method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
-          });
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error || 'Deletion failed');
-          await AsyncStorage.clear();
-          if (Platform.OS !== 'web') {
-            const files = await FileSystem.readDirectoryAsync(FileSystem.documentDirectory);
-            for (const f of files) await FileSystem.deleteAsync(`${FileSystem.documentDirectory}${f}`, { idempotent: true });
-          }
-          onLogout();
-        } catch (err) { Alert.alert('Error', err.message); }
-        finally { setActionLoading(null); }
-      }}
-    ]);
+    const doDelete = async () => {
+      setActionLoading('delete-account');
+      try {
+        const res = await fetch(`${serverUrl}/api/auth/delete-account`, {
+          method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to delete account');
+        if (Platform.OS === 'web') {
+          window.alert('Account deleted.');
+        } else {
+          Alert.alert('Account Deleted', 'Your account has been deleted.');
+        }
+        await onLogout();
+      } catch (err) {
+        if (Platform.OS === 'web') {
+          window.alert('Error: ' + err.message);
+        } else {
+          Alert.alert('Error', err.message);
+        }
+      } finally {
+        setActionLoading(null);
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm('Permanently delete your account? This cannot be undone.')) {
+        await doDelete();
+      }
+    } else {
+      Alert.alert('Danger Zone', 'Permanently delete your account? This cannot be undone.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: doDelete }
+      ]);
+    }
   }
 
   const themeLabels = { system: 'System', light: 'Light', dark: 'Dark' };
