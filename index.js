@@ -11,8 +11,10 @@ const state = {
   activeSidebarTab: 'home', // 'home' | 'groups' | 'requests'
   selectedChats: new Set(),
   selectedRequests: new Set(),
+  selectedGroups: new Set(),
   isChatsSelectionMode: false,
   isRequestsSelectionMode: false,
+  isGroupsSelectionMode: false,
   chats: [], // [{ username, email, deviceKeys: [{device_id, public_key}], unreadCount, status }]
   groups: [], // [{ id, name, members: [usernames], createdBy, createdAt, unreadCount }]
   messages: [], // [{ id, chatPartner, sender, body, timestamp, media: { url, filename, type, size }, status }]
@@ -1013,6 +1015,34 @@ async function handleIncomingMessage(data) {
       renderGroupsList();
       showToast(`Added to group "${data.group.name}"!`, 'info');
     }
+    return;
+  }
+
+  // 0B-2. Handle Group Updated Notification (members added/exited)
+  if (data.type === 'group_updated' && data.group) {
+    let group = state.groups.find(g => g.id === data.group.id);
+    const isMemberNow = data.group.members.includes(state.user?.username);
+
+    if (isMemberNow) {
+      if (group) {
+        group.members = data.group.members;
+        if (data.group.name) group.name = data.group.name;
+      } else {
+        state.groups.push(data.group);
+      }
+    } else {
+      // User was removed or exited
+      state.groups = state.groups.filter(g => g.id !== data.group.id);
+      if (state.activeGroup && state.activeGroup.id === data.group.id) {
+        state.activeGroup = null;
+        document.getElementById('chatPane')?.classList.remove('active');
+        document.getElementById('chatEmptyState')?.classList.add('active');
+      }
+    }
+
+    saveStateToLocalStorage();
+    renderGroupsList();
+    renderActiveChat();
     return;
   }
 
@@ -2280,6 +2310,345 @@ async function executeCreateGroup(groupName, selectedMemberUsernames) {
   showToast(`Group "${newGroup.name}" created!`, 'success');
 }
 
+/* ═══════════ GROUPS SELECTION & ACTION BAR CONTROLLERS ═══════════ */
+function toggleGroupSelection(groupId) {
+  state.isGroupsSelectionMode = true;
+  if (state.selectedGroups.has(groupId)) {
+    state.selectedGroups.delete(groupId);
+  } else {
+    state.selectedGroups.add(groupId);
+  }
+  updateGroupsSelectionBar();
+  renderGroupsList();
+}
+
+function updateGroupsSelectionBar() {
+  const bar = document.getElementById('groupsSelectionBar');
+  const countEl = document.getElementById('groupsSelectedCount');
+  const btnSelectAll = document.getElementById('btnSelectAllGroups');
+
+  if (state.selectedGroups.size === 0) {
+    state.isGroupsSelectionMode = false;
+    if (bar) bar.style.display = 'none';
+  } else {
+    state.isGroupsSelectionMode = true;
+    if (bar) bar.style.display = 'flex';
+    if (countEl) countEl.innerText = `${state.selectedGroups.size} Selected`;
+    const isAllSelected = state.groups.length > 0 && state.selectedGroups.size === state.groups.length;
+    if (btnSelectAll) btnSelectAll.innerText = isAllSelected ? 'Deselect All' : 'Select All';
+  }
+}
+
+function exitGroupsSelection() {
+  state.isGroupsSelectionMode = false;
+  state.selectedGroups.clear();
+  const bar = document.getElementById('groupsSelectionBar');
+  if (bar) bar.style.display = 'none';
+  renderGroupsList();
+}
+
+function toggleSelectAllGroups() {
+  if (state.selectedGroups.size === state.groups.length) {
+    state.selectedGroups.clear();
+    exitGroupsSelection();
+  } else {
+    state.isGroupsSelectionMode = true;
+    state.groups.forEach(g => state.selectedGroups.add(g.id));
+    updateGroupsSelectionBar();
+    renderGroupsList();
+  }
+}
+
+function exitSelectedGroups() {
+  if (state.selectedGroups.size === 0) return;
+  const count = state.selectedGroups.size;
+
+  showConfirmModal({
+    title: `Exit ${count} Group${count > 1 ? 's' : ''}?`,
+    message: `Are you sure you want to leave ${count} selected group${count > 1 ? 's' : ''}? You will no longer receive messages from ${count > 1 ? 'these groups' : 'this group'}.`,
+    icon: 'log-out',
+    confirmText: `Exit ${count} Group${count > 1 ? 's' : ''}`,
+    cancelText: 'Cancel',
+    isDanger: true,
+    onConfirm: async () => {
+      const selectedGroupIds = Array.from(state.selectedGroups);
+      
+      for (const gid of selectedGroupIds) {
+        await executeExitGroup(gid, false);
+      }
+
+      exitGroupsSelection();
+      showToast(`Exited ${count} group${count > 1 ? 's' : ''}`, 'info');
+    }
+  });
+}
+
+function deleteSelectedGroups() {
+  if (state.selectedGroups.size === 0) return;
+  const count = state.selectedGroups.size;
+
+  showConfirmModal({
+    title: `Delete ${count} Group${count > 1 ? 's' : ''}?`,
+    message: `Are you sure you want to delete ${count} selected group${count > 1 ? 's' : ''} and all local chat history?`,
+    icon: 'trash-2',
+    confirmText: `Delete ${count} Group${count > 1 ? 's' : ''}`,
+    cancelText: 'Cancel',
+    isDanger: true,
+    onConfirm: () => {
+      const selectedGroupIds = Array.from(state.selectedGroups);
+      state.groups = state.groups.filter(g => !selectedGroupIds.includes(g.id));
+      state.messages = state.messages.filter(m => !selectedGroupIds.includes(m.chatPartner));
+
+      if (state.activeGroup && selectedGroupIds.includes(state.activeGroup.id)) {
+        state.activeGroup = null;
+        document.getElementById('chatPane')?.classList.remove('active');
+        document.getElementById('chatEmptyState')?.classList.add('active');
+      }
+
+      saveStateToLocalStorage();
+      exitGroupsSelection();
+      showToast(`${count} group${count > 1 ? 's' : ''} deleted`, 'info');
+    }
+  });
+}
+
+/* ═══════════ GROUP DETAILS & MEMBER ADDITION CONTROLLERS ═══════════ */
+function openGroupDetailsModal(groupId) {
+  const group = state.groups.find(g => g.id === groupId);
+  if (!group) return;
+
+  const modal = document.getElementById('groupDetailsModal');
+  const avatar = document.getElementById('groupDetailsAvatar');
+  const title = document.getElementById('groupDetailsTitle');
+  const sub = document.getElementById('groupDetailsSubtitle');
+  const count = document.getElementById('groupDetailsMembersCount');
+  const list = document.getElementById('groupDetailsMembersList');
+  const checklist = document.getElementById('addMembersChecklist');
+  const selectedCount = document.getElementById('addMembersSelectedCount');
+  const addBtn = document.getElementById('btnExecuteAddMembers');
+
+  if (avatar) avatar.innerText = (group.name || 'G').substring(0, 2).toUpperCase();
+  if (title) title.innerText = group.name;
+  if (sub) sub.innerText = `Created by @${group.createdBy || 'unknown'}`;
+  if (count) count.innerText = `${group.members.length} members`;
+
+  // Render current active members
+  if (list) {
+    list.innerHTML = '';
+    group.members.forEach(username => {
+      const memberItem = document.createElement('div');
+      memberItem.className = 'group-member-item';
+      
+      const isCreator = username === group.createdBy;
+      const isYou = username === state.user?.username;
+      const initial = (username || 'U').substring(0, 2).toUpperCase();
+
+      memberItem.innerHTML = `
+        <div class="group-member-left">
+          <div class="group-member-avatar">${initial}</div>
+          <span class="group-member-username">@${username}</span>
+        </div>
+        <div style="display: flex; gap: 4px; align-items: center;">
+          ${isCreator ? '<span class="member-badge-creator">Creator</span>' : ''}
+          ${isYou ? '<span class="member-badge-you">You</span>' : ''}
+        </div>
+      `;
+      list.appendChild(memberItem);
+    });
+  }
+
+  // Render contacts NOT in this group for adding
+  if (checklist) {
+    checklist.innerHTML = '';
+    if (selectedCount) selectedCount.innerText = '0 selected';
+    if (addBtn) addBtn.disabled = true;
+
+    const connectedContacts = state.chats.filter(c => c && (c.status === 'accepted' || c.status === 'pending_outgoing' || !c.status));
+    const nonMembers = connectedContacts.filter(c => !group.members.includes(c.username));
+
+    if (nonMembers.length === 0) {
+      checklist.innerHTML = `
+        <div style="padding: 10px; font-size: 12px; color: var(--text-muted); text-align: center;">
+          All your contacts are already in this group.
+        </div>
+      `;
+    } else {
+      nonMembers.forEach(c => {
+        const item = document.createElement('label');
+        item.className = 'group-checklist-item';
+        const initial = (c.username || 'C').substring(0, 2).toUpperCase();
+
+        item.innerHTML = `
+          <input type="checkbox" value="${c.username}">
+          <div class="group-checklist-avatar">${initial}</div>
+          <div class="group-checklist-info">@${c.username}</div>
+        `;
+
+        item.querySelector('input').addEventListener('change', () => {
+          const selected = checklist.querySelectorAll('input[type="checkbox"]:checked');
+          if (selectedCount) selectedCount.innerText = `${selected.length} selected`;
+          if (addBtn) addBtn.disabled = selected.length === 0;
+        });
+
+        checklist.appendChild(item);
+      });
+    }
+  }
+
+  // Bind direct Exit / Delete modal buttons
+  const exitBtn = document.getElementById('btnExitGroupModal');
+  const deleteBtn = document.getElementById('btnDeleteGroupModal');
+
+  if (exitBtn) {
+    exitBtn.onclick = () => {
+      closeGroupDetailsModal();
+      executeExitGroup(groupId, true);
+    };
+  }
+
+  if (deleteBtn) {
+    deleteBtn.onclick = () => {
+      closeGroupDetailsModal();
+      executeDeleteGroup(groupId);
+    };
+  }
+
+  if (addBtn) {
+    addBtn.onclick = () => {
+      const selectedBoxes = checklist ? checklist.querySelectorAll('input[type="checkbox"]:checked') : [];
+      const newMembers = Array.from(selectedBoxes).map(cb => cb.value);
+      if (newMembers.length > 0) {
+        executeAddMembersToGroup(groupId, newMembers);
+      }
+    };
+  }
+
+  modal?.classList.add('active');
+  feather.replace();
+}
+
+function closeGroupDetailsModal() {
+  document.getElementById('groupDetailsModal')?.classList.remove('active');
+}
+
+async function executeAddMembersToGroup(groupId, newMemberUsernames) {
+  const group = state.groups.find(g => g.id === groupId);
+  if (!group) return;
+
+  const updatedMembers = Array.from(new Set([...group.members, ...newMemberUsernames]));
+  group.members = updatedMembers;
+  saveStateToLocalStorage();
+
+  // Send group_updated packet to all members (existing + new)
+  const updatePacket = {
+    type: 'group_updated',
+    group: group
+  };
+
+  const allOtherMembers = updatedMembers.filter(m => m !== state.user?.username);
+  for (const member of allOtherMembers) {
+    try {
+      if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+        state.socket.send(JSON.stringify({ ...updatePacket, recipient: member }));
+      } else {
+        await apiCall('/api/messages', 'POST', { recipient: member, packet: updatePacket });
+      }
+    } catch (e) {
+      console.warn(`[GROUP UPDATE] Failed notify to ${member}:`, e);
+    }
+  }
+
+  // Refresh group details modal & status bar
+  openGroupDetailsModal(groupId);
+  if (state.activeGroup && state.activeGroup.id === groupId) {
+    const statusText = document.getElementById('chatTitleStatusText');
+    if (statusText) statusText.innerText = `Group • ${group.members.length} Members`;
+  }
+
+  renderGroupsList();
+  showToast(`Added ${newMemberUsernames.length} member(s) to "${group.name}"`, 'success');
+}
+
+async function executeExitGroup(groupId, showConfirm = true) {
+  const group = state.groups.find(g => g.id === groupId);
+  if (!group) return;
+
+  const performExit = async () => {
+    group.members = group.members.filter(m => m !== state.user?.username);
+    
+    // Broadcast update to remaining members
+    const updatePacket = {
+      type: 'group_updated',
+      group: group
+    };
+
+    for (const member of group.members) {
+      try {
+        if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+          state.socket.send(JSON.stringify({ ...updatePacket, recipient: member }));
+        } else {
+          await apiCall('/api/messages', 'POST', { recipient: member, packet: updatePacket });
+        }
+      } catch (e) {}
+    }
+
+    // Remove group locally
+    state.groups = state.groups.filter(g => g.id !== groupId);
+
+    if (state.activeGroup && state.activeGroup.id === groupId) {
+      state.activeGroup = null;
+      document.getElementById('chatPane')?.classList.remove('active');
+      document.getElementById('chatEmptyState')?.classList.add('active');
+    }
+
+    saveStateToLocalStorage();
+    renderGroupsList();
+    if (showConfirm) showToast(`You left "${group.name}"`, 'info');
+  };
+
+  if (showConfirm) {
+    showConfirmModal({
+      title: `Exit Group "${group.name}"?`,
+      message: `Are you sure you want to exit this group? You will no longer receive new messages from members in this group.`,
+      icon: 'log-out',
+      confirmText: 'Exit Group',
+      cancelText: 'Cancel',
+      isDanger: true,
+      onConfirm: performExit
+    });
+  } else {
+    await performExit();
+  }
+}
+
+function executeDeleteGroup(groupId) {
+  const group = state.groups.find(g => g.id === groupId);
+  if (!group) return;
+
+  showConfirmModal({
+    title: `Delete Group "${group.name}"?`,
+    message: `Are you sure you want to delete this group and all its local chat history? This action cannot be undone.`,
+    icon: 'trash-2',
+    confirmText: 'Delete Group',
+    cancelText: 'Cancel',
+    isDanger: true,
+    onConfirm: () => {
+      state.groups = state.groups.filter(g => g.id !== groupId);
+      state.messages = state.messages.filter(m => m.chatPartner !== groupId);
+
+      if (state.activeGroup && state.activeGroup.id === groupId) {
+        state.activeGroup = null;
+        document.getElementById('chatPane')?.classList.remove('active');
+        document.getElementById('chatEmptyState')?.classList.add('active');
+      }
+
+      saveStateToLocalStorage();
+      renderGroupsList();
+      showToast(`Group "${group.name}" deleted`, 'info');
+    }
+  });
+}
+
 function renderGroupsList() {
   const container = document.getElementById('groupsContainer');
   const countBadge = document.getElementById('groupsCountBadge');
@@ -2325,11 +2694,17 @@ function renderGroupsList() {
       : '';
 
     const avatarInitial = (group.name || 'G').substring(0, 2).toUpperCase();
+    const isSelected = state.selectedGroups.has(group.id);
 
     const item = document.createElement('div');
-    item.className = `group-item ${state.activeGroup && state.activeGroup.id === group.id ? 'active' : ''}`;
+    item.className = `group-item ${state.activeGroup && state.activeGroup.id === group.id ? 'active' : ''} ${isSelected ? 'selected' : ''}`;
 
     item.innerHTML = `
+      ${state.isGroupsSelectionMode ? `
+        <div class="custom-checkbox">
+          <i data-feather="check"></i>
+        </div>
+      ` : ''}
       <div class="group-item-avatar">${avatarInitial}</div>
       <div class="group-item-info">
         <div class="group-item-header">
@@ -2343,11 +2718,20 @@ function renderGroupsList() {
       </div>
     `;
 
-    item.addEventListener('click', () => {
-      group.unreadCount = 0;
-      saveStateToLocalStorage();
-      openGroupConversation(group.id);
-    });
+    bindLongPress(item, 
+      () => {
+        toggleGroupSelection(group.id);
+      },
+      () => {
+        if (state.isGroupsSelectionMode) {
+          toggleGroupSelection(group.id);
+        } else {
+          group.unreadCount = 0;
+          saveStateToLocalStorage();
+          openGroupConversation(group.id);
+        }
+      }
+    );
 
     container.appendChild(item);
   });
@@ -3210,6 +3594,23 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('tabNavHome')?.addEventListener('click', () => switchSidebarTab('home'));
   document.getElementById('tabNavGroups')?.addEventListener('click', () => switchSidebarTab('groups'));
   document.getElementById('tabNavRequests')?.addEventListener('click', () => switchSidebarTab('requests'));
+
+  // Groups Selection Action Bar Listeners
+  document.getElementById('btnExitGroupsSelection')?.addEventListener('click', exitGroupsSelection);
+  document.getElementById('btnSelectAllGroups')?.addEventListener('click', toggleSelectAllGroups);
+  document.getElementById('btnExitSelectedGroups')?.addEventListener('click', exitSelectedGroups);
+  document.getElementById('btnDeleteSelectedGroups')?.addEventListener('click', deleteSelectedGroups);
+
+  // Group Details Modal Close Button
+  document.getElementById('btnCloseGroupDetailsModal')?.addEventListener('click', closeGroupDetailsModal);
+
+  // Chat Header User click listener -> Open Group Details Modal when viewing active group
+  document.querySelector('.chat-header-user')?.addEventListener('click', (e) => {
+    if (e.target.closest('.back-btn')) return;
+    if (state.activeGroup) {
+      openGroupDetailsModal(state.activeGroup.id);
+    }
+  });
 
   // Group Creation Triggers & Form Submit
   document.getElementById('btnOpenCreateGroupModal')?.addEventListener('click', openCreateGroupModal);

@@ -207,6 +207,25 @@
 
             <!-- VIEW 2: GROUPS (E2EE Multi-User Group Chats) -->
             <div id="groupsView" class="sidebar-tab-view">
+              <!-- Groups Selection Action Bar (hidden by default) -->
+              <div class="selection-action-bar" id="groupsSelectionBar" style="display: none;">
+                <div class="selection-info">
+                  <button type="button" class="icon-btn" id="btnExitGroupsSelection" title="Cancel Selection">
+                    <i data-feather="x"></i>
+                  </button>
+                  <span id="groupsSelectedCount" class="selection-count-text">0 Selected</span>
+                </div>
+                <div class="selection-actions">
+                  <button type="button" class="btn btn-outline btn-xs" id="btnSelectAllGroups">All</button>
+                  <button type="button" class="btn btn-outline btn-warning btn-xs" id="btnExitSelectedGroups" title="Exit Selected Groups">
+                    <i data-feather="log-out"></i> <span class="btn-text">Exit</span>
+                  </button>
+                  <button type="button" class="btn btn-danger btn-xs" id="btnDeleteSelectedGroups" title="Delete Selected Groups">
+                    <i data-feather="trash-2"></i> <span class="btn-text">Delete</span>
+                  </button>
+                </div>
+              </div>
+
               <div class="groups-view-header">
                 <div class="groups-view-title">
                   <i data-feather="users"></i>
@@ -581,7 +600,67 @@
       </div>
     </div>
 
-    <!-- 7. CUSTOM GLASSMORPHIC CONFIRMATION MODAL (Replaces native browser confirm) -->
+    <!-- 7. GROUP DETAILS & PROFILE MODAL -->
+    <div id="groupDetailsModal" class="modal-overlay">
+      <div class="modal-card glass-panel" style="max-width: 500px;">
+        <div class="modal-header">
+          <div class="modal-title">
+            <i data-feather="users" class="modal-title-icon"></i>
+            <h3>Group Info</h3>
+          </div>
+          <button type="button" class="icon-btn modal-close-btn" id="btnCloseGroupDetailsModal">
+            <i data-feather="x"></i>
+          </button>
+        </div>
+        <div class="modal-body" style="padding: 20px;">
+          <!-- Group Profile Header -->
+          <div class="group-details-profile">
+            <div class="group-details-avatar" id="groupDetailsAvatar">PA</div>
+            <h3 id="groupDetailsTitle" style="font-size: 18px; font-weight: 700; color: var(--text-primary); margin-top: 10px;">Group Name</h3>
+            <p id="groupDetailsSubtitle" style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Created by @username</p>
+          </div>
+
+          <!-- Active Members List -->
+          <div class="group-details-section" style="margin-top: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <h5 style="font-size: 13px; font-weight: 700; color: var(--text-primary);">Group Members</h5>
+              <span style="font-size: 11px; color: var(--text-muted);" id="groupDetailsMembersCount">0 members</span>
+            </div>
+            <div class="group-members-list" id="groupDetailsMembersList">
+              <!-- Active members populate dynamically -->
+            </div>
+          </div>
+
+          <!-- Add More People Section -->
+          <div class="group-details-section" style="margin-top: 20px; border-top: 1px solid var(--border); padding-top: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <h5 style="font-size: 13px; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 6px;">
+                <i data-feather="user-plus" style="width: 14px; height: 14px; stroke: var(--accent);"></i> Add People to Group
+              </h5>
+              <span style="font-size: 11px; color: var(--text-muted);" id="addMembersSelectedCount">0 selected</span>
+            </div>
+            <div class="group-checklist-container" id="addMembersChecklist" style="max-height: 140px;">
+              <!-- Non-member contacts checkboxes populate dynamically -->
+            </div>
+            <button type="button" class="btn btn-primary btn-sm" id="btnExecuteAddMembers" style="margin-top: 12px; width: 100%; justify-content: center;" disabled>
+              <i data-feather="user-plus"></i> Add Selected Members
+            </button>
+          </div>
+
+          <!-- Group Actions (Exit & Delete) -->
+          <div class="group-details-actions" style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border); display: flex; gap: 12px;">
+            <button type="button" class="btn btn-outline btn-warning" id="btnExitGroupModal" style="flex: 1; justify-content: center;">
+              <i data-feather="log-out"></i> Exit Group
+            </button>
+            <button type="button" class="btn btn-danger" id="btnDeleteGroupModal" style="flex: 1; justify-content: center;">
+              <i data-feather="trash-2"></i> Delete Group
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 8. CUSTOM GLASSMORPHIC CONFIRMATION MODAL (Replaces native browser confirm) -->
     <div id="customConfirmModal" class="modal-overlay">
       <div class="confirm-modal-card">
         <div class="confirm-modal-icon-wrapper" id="confirmModalIconWrapper">
