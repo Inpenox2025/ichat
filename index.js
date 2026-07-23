@@ -3436,6 +3436,11 @@ function initDashboard() {
   if (!state.pollInterval) {
     state.pollInterval = setInterval(pollTransientQueue, 3000);
   }
+
+  // Sync active device public key to server
+  if (state.token && state.keys?.publicKey) {
+    apiCall(`/api/auth?action=me&public_key=${encodeURIComponent(encodeBase64(state.keys.publicKey))}`, 'POST').catch(console.warn);
+  }
 }
 
 

@@ -101,6 +101,8 @@ module.exports = async function handler(req, res) {
       const deviceRecord = await sql`
         INSERT INTO devices (user_id, device_id, device_name, public_key, last_active)
         VALUES (${user.id}, ${device_id}, ${device_name || 'Unknown Device'}, ${public_key}, NOW())
+        ON CONFLICT (user_id, device_id) DO UPDATE 
+        SET public_key = ${public_key}, device_name = ${device_name || 'Unknown Device'}, last_active = NOW()
         RETURNING *
       `;
 
@@ -188,12 +190,21 @@ module.exports = async function handler(req, res) {
 
       const activeDevices = await sql`SELECT * FROM devices WHERE user_id = ${decoded.userId}`;
 
-      // Update current device's active status
-      await sql`
-        UPDATE devices 
-        SET last_active = NOW() 
-        WHERE user_id = ${decoded.userId} AND device_id = ${decoded.deviceId}
-      `;
+      // Update current device's active status and public_key if provided
+      const clientPublicKey = req.body?.public_key || req.query?.public_key;
+      if (clientPublicKey) {
+        await sql`
+          UPDATE devices 
+          SET last_active = NOW(), public_key = ${clientPublicKey} 
+          WHERE user_id = ${decoded.userId} AND device_id = ${decoded.deviceId}
+        `;
+      } else {
+        await sql`
+          UPDATE devices 
+          SET last_active = NOW() 
+          WHERE user_id = ${decoded.userId} AND device_id = ${decoded.deviceId}
+        `;
+      }
 
       return res.status(200).json({
         success: true,
