@@ -1833,8 +1833,9 @@ function getGoogleAccessToken() {
       return reject(new Error('Google Identity Services SDK not loaded'));
     }
 
+    const DEFAULT_GOOGLE_CLIENT_ID = '106602076966-j449t85if2ul4bjhuks07fhf8d1cnp1c.apps.googleusercontent.com';
     const clientIdInput = document.getElementById('googleClientIdInput');
-    const clientId = (clientIdInput?.value || localStorage.getItem('ichat_google_client_id') || '').trim();
+    const clientId = (clientIdInput?.value || localStorage.getItem('ichat_google_client_id') || DEFAULT_GOOGLE_CLIENT_ID).trim();
 
     if (!clientId) {
       return reject(new Error('Google OAuth Client ID is required. Please enter your OAuth Client ID in Settings under Google Drive Backup.'));
@@ -3745,7 +3746,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   const googleClientIdInput = document.getElementById('googleClientIdInput');
   if (googleClientIdInput) {
-    googleClientIdInput.value = localStorage.getItem('ichat_google_client_id') || '';
+    googleClientIdInput.value = localStorage.getItem('ichat_google_client_id') || '106602076966-j449t85if2ul4bjhuks07fhf8d1cnp1c.apps.googleusercontent.com';
     googleClientIdInput.addEventListener('change', (e) => {
       localStorage.setItem('ichat_google_client_id', e.target.value.trim());
       googleDriveAccessToken = null;
