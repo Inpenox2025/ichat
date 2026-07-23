@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { SafeAreaView, Text, TouchableOpacity } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -20,6 +21,52 @@ import { decryptAsymmetric, decryptSymmetric, encryptAsymmetric, encryptSymmetri
 import { registerForPushNotificationsAsync, presentLocalNotification } from './src/services/notifications';
 
 const Stack = createNativeStackNavigator();
+
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('[React Error Boundary]', error, errorInfo);
+  }
+
+  handleReset = async () => {
+    try {
+      await AsyncStorage.multiRemove(['ichat_chats', 'ichat_messages', 'ichat_outbox', 'ichat_last_route']);
+    } catch (e) {}
+    this.setState({ hasError: false, error: null });
+    if (typeof window !== 'undefined' && window.location) {
+      window.location.reload();
+    }
+  };
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#090d16', justifyContent: 'center', alignItems: 'center', padding: 24 }}>
+          <Text style={{ fontSize: 40, marginBottom: 12 }}>⚠️</Text>
+          <Text style={{ color: '#00f2fe', fontWeight: '800', fontSize: 20, marginBottom: 8 }}>App Encountered an Issue</Text>
+          <Text style={{ color: '#94a3b8', fontSize: 13, textAlign: 'center', marginBottom: 20 }}>
+            {this.state.error?.message || 'An unexpected rendering error occurred.'}
+          </Text>
+          <TouchableOpacity
+            style={{ backgroundColor: '#00f2fe', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 10 }}
+            onPress={this.handleReset}
+          >
+            <Text style={{ color: '#0c101a', fontWeight: '800', fontSize: 14 }}>🔄 Reset App Data & Reload</Text>
+          </TouchableOpacity>
+        </SafeAreaView>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 export default function App() {
   const [token, setToken] = useState(null);
@@ -70,20 +117,42 @@ export default function App() {
 
         if (savedToken && savedUser && savedServer) {
           setToken(savedToken);
-          setUser(JSON.parse(savedUser));
+          try { setUser(JSON.parse(savedUser)); } catch (e) {}
           setServerUrl(savedServer);
           setActiveTab(savedTab);
           
-          // Load chat & group database
-          const savedChats = await AsyncStorage.getItem('ichat_chats');
-          const savedGroups = await AsyncStorage.getItem('ichat_groups');
-          const savedMsgs = await AsyncStorage.getItem('ichat_messages');
-          const savedOutbox = await AsyncStorage.getItem('ichat_outbox');
+          // Load chat & group database with safe fallbacks
+          try {
+            const savedChats = await AsyncStorage.getItem('ichat_chats');
+            if (savedChats) {
+              const p = JSON.parse(savedChats);
+              setChats(Array.isArray(p) ? p : []);
+            }
+          } catch (e) {}
 
-          if (savedChats) setChats(JSON.parse(savedChats));
-          if (savedGroups) setGroups(JSON.parse(savedGroups));
-          if (savedMsgs) setMessages(JSON.parse(savedMsgs));
-          if (savedOutbox) setOutbox(JSON.parse(savedOutbox));
+          try {
+            const savedGroups = await AsyncStorage.getItem('ichat_groups');
+            if (savedGroups) {
+              const p = JSON.parse(savedGroups);
+              setGroups(Array.isArray(p) ? p : []);
+            }
+          } catch (e) {}
+
+          try {
+            const savedMsgs = await AsyncStorage.getItem('ichat_messages');
+            if (savedMsgs) {
+              const p = JSON.parse(savedMsgs);
+              setMessages(Array.isArray(p) ? p : (typeof p === 'object' && p ? Object.values(p).flat() : []));
+            }
+          } catch (e) {}
+
+          try {
+            const savedOutbox = await AsyncStorage.getItem('ichat_outbox');
+            if (savedOutbox) {
+              const p = JSON.parse(savedOutbox);
+              setOutbox(Array.isArray(p) ? p : []);
+            }
+          } catch (e) {}
         }
         setTheme(savedTheme);
         registerForPushNotificationsAsync();
@@ -819,119 +888,121 @@ export default function App() {
   }
 
   return (
-    <ThemeProvider>
-      <SafeAreaProvider>
-        <StatusBar style="auto" />
-        <NavigationContainer 
-          ref={navigationRef}
-          onStateChange={() => {
-            try {
-              const currentName = navigationRef.current?.getCurrentRoute()?.name;
-              if (currentName && (currentName === 'MainHome' || currentName === 'Settings')) {
-                AsyncStorage.setItem('ichat_last_route', currentName);
-              }
-            } catch (e) {}
-          }}
-        >
-          {!token ? (
-            <AuthScreen onAuthSuccess={handleAuthSuccess} />
-          ) : (
-            <Stack.Navigator
-              initialRouteName={initialRoute}
-              screenOptions={{
-                headerShown: false,
-                contentStyle: { backgroundColor: 'transparent' }
-              }}
-            >
-            {/* Main chat list with custom 4-tab bottom nav */}
-            <Stack.Screen name="MainHome">
-              {(props) => (
-                <ChatListScreen
-                  {...props}
-                  chats={chats}
-                  groups={groups}
-                  messages={messages}
-                  activeTab={activeTab}
-                  onSwitchTab={handleSwitchTab}
-                  onSelectChat={handleSelectChat}
-                  onSelectGroup={handleSelectGroup}
-                  onCreateGroup={handleCreateGroup}
-                  onDeleteSelectedChats={handleDeleteSelectedChats}
-                  onDeleteSelectedGroups={handleDeleteSelectedGroups}
-                  onExitSelectedGroups={handleExitSelectedGroups}
-                  onAcceptRequest={handleAcceptRequest}
-                  onDeclineRequest={handleDeclineRequest}
-                  serverUrl={serverUrl}
-                  token={token}
-                  user={user}
-                  currentUsername={user?.username}
-                />
-              )}
-            </Stack.Screen>
+    <ErrorBoundary>
+      <ThemeProvider>
+        <SafeAreaProvider>
+          <StatusBar style="auto" />
+          <NavigationContainer 
+            ref={navigationRef}
+            onStateChange={() => {
+              try {
+                const currentName = navigationRef.current?.getCurrentRoute()?.name;
+                if (currentName && (currentName === 'MainHome' || currentName === 'Settings')) {
+                  AsyncStorage.setItem('ichat_last_route', currentName);
+                }
+              } catch (e) {}
+            }}
+          >
+            {!token ? (
+              <AuthScreen onAuthSuccess={handleAuthSuccess} />
+            ) : (
+              <Stack.Navigator
+                initialRouteName={initialRoute}
+                screenOptions={{
+                  headerShown: false,
+                  contentStyle: { backgroundColor: 'transparent' }
+                }}
+              >
+              {/* Main chat list with custom 4-tab bottom nav */}
+              <Stack.Screen name="MainHome">
+                {(props) => (
+                  <ChatListScreen
+                    {...props}
+                    chats={chats}
+                    groups={groups}
+                    messages={messages}
+                    activeTab={activeTab}
+                    onSwitchTab={handleSwitchTab}
+                    onSelectChat={handleSelectChat}
+                    onSelectGroup={handleSelectGroup}
+                    onCreateGroup={handleCreateGroup}
+                    onDeleteSelectedChats={handleDeleteSelectedChats}
+                    onDeleteSelectedGroups={handleDeleteSelectedGroups}
+                    onExitSelectedGroups={handleExitSelectedGroups}
+                    onAcceptRequest={handleAcceptRequest}
+                    onDeclineRequest={handleDeclineRequest}
+                    serverUrl={serverUrl}
+                    token={token}
+                    user={user}
+                    currentUsername={user?.username}
+                  />
+                )}
+              </Stack.Screen>
 
-            {/* Settings screen - navigated to from ChatListScreen's Settings tab */}
-            <Stack.Screen name="Settings">
-              {(props) => (
-                <SettingsScreen
-                  {...props}
-                  chats={chats}
-                  messages={messages}
-                  onRestoreCompleted={handleRestoreCompleted}
-                  onLogout={handleLogout}
-                  serverUrl={serverUrl}
-                  token={token}
-                  user={user}
-                />
-              )}
-            </Stack.Screen>
+              {/* Settings screen - navigated to from ChatListScreen's Settings tab */}
+              <Stack.Screen name="Settings">
+                {(props) => (
+                  <SettingsScreen
+                    {...props}
+                    chats={chats}
+                    messages={messages}
+                    onRestoreCompleted={handleRestoreCompleted}
+                    onLogout={handleLogout}
+                    serverUrl={serverUrl}
+                    token={token}
+                    user={user}
+                  />
+                )}
+              </Stack.Screen>
 
-            {/* Chat conversation view screen */}
-            <Stack.Screen name="Chat">
-              {(props) => (
-                <ChatScreen
-                  {...props}
-                  messages={messages}
-                  onSendMessage={handleSendMessage}
-                  onSendReadReceipt={handleSendReadReceipt}
-                  typingStatus={typingPartner === props.route.params.username}
-                  serverUrl={serverUrl}
-                  token={token}
-                  currentUsername={user?.username}
-                  onOpenGroupDetails={(group) => {
-                    setGroupDetailsGroup(group);
-                    setShowGroupDetailsModal(true);
-                  }}
-                />
-              )}
-            </Stack.Screen>
+              {/* Chat conversation view screen */}
+              <Stack.Screen name="Chat">
+                {(props) => (
+                  <ChatScreen
+                    {...props}
+                    messages={messages}
+                    onSendMessage={handleSendMessage}
+                    onSendReadReceipt={handleSendReadReceipt}
+                    typingStatus={typingPartner === props.route.params.username}
+                    serverUrl={serverUrl}
+                    token={token}
+                    currentUsername={user?.username}
+                    onOpenGroupDetails={(group) => {
+                      setGroupDetailsGroup(group);
+                      setShowGroupDetailsModal(true);
+                    }}
+                  />
+                )}
+              </Stack.Screen>
 
-            {/* Call Screen overlay */}
-            <Stack.Screen name="Call">
-              {(props) => (
-                <CallScreen
-                  {...props}
-                  onSendMessage={handleSendMessage}
-                  callState={callState}
-                  onHangupCall={handleHangupCall}
-                />
-              )}
-            </Stack.Screen>
-            </Stack.Navigator>
-          )}
+              {/* Call Screen overlay */}
+              <Stack.Screen name="Call">
+                {(props) => (
+                  <CallScreen
+                    {...props}
+                    onSendMessage={handleSendMessage}
+                    callState={callState}
+                    onHangupCall={handleHangupCall}
+                  />
+                )}
+              </Stack.Screen>
+              </Stack.Navigator>
+            )}
 
-          {/* Global Group Details Modal */}
-          <GroupDetailsModal
-            visible={showGroupDetailsModal}
-            onClose={() => setShowGroupDetailsModal(false)}
-            group={groupDetailsGroup}
-            currentUser={user}
-            contacts={chats}
-            onAddMembers={handleAddMembersToGroup}
-            onExitGroup={handleExitGroup}
-            onDeleteGroup={handleDeleteGroup}
-          />
-        </NavigationContainer>
-      </SafeAreaProvider>
-    </ThemeProvider>
+            {/* Global Group Details Modal */}
+            <GroupDetailsModal
+              visible={showGroupDetailsModal}
+              onClose={() => setShowGroupDetailsModal(false)}
+              group={groupDetailsGroup}
+              currentUser={user}
+              contacts={chats}
+              onAddMembers={handleAddMembersToGroup}
+              onExitGroup={handleExitGroup}
+              onDeleteGroup={handleDeleteGroup}
+            />
+          </NavigationContainer>
+        </SafeAreaProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
   );
 }

@@ -41,7 +41,7 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
 
   const [backupPass, setBackupPass] = useState('');
   const [restorePass, setRestorePass] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [actionLoading, setActionLoading] = useState(null);
   const [textStorageSize, setTextStorageSize] = useState('0 KB');
   const [mediaStorageSize, setMediaStorageSize] = useState('0 MB');
   const [backupStatus, setBackupStatus] = useState('Never');
