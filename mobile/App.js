@@ -96,6 +96,56 @@ export default function App() {
     loadInitialData();
   }, []);
 
+  // Automatic Daily Backup Scheduler (runs every 24h when schedule === 'daily')
+  useEffect(() => {
+    if (!token || !serverUrl) return;
+
+    async function checkAutoBackup() {
+      try {
+        const schedule = await AsyncStorage.getItem('ichat_backup_schedule');
+        if (schedule !== 'daily') return;
+
+        const lastBackup = await AsyncStorage.getItem('ichat_backup_status');
+        const savedPass = await AsyncStorage.getItem('ichat_backup_passcode');
+        if (!savedPass) return;
+
+        const now = Date.now();
+        const lastTime = lastBackup ? new Date(lastBackup).getTime() : 0;
+        const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+        if (now - lastTime >= ONE_DAY_MS) {
+          console.log('[AUTO BACKUP] Running scheduled daily backup...');
+          const current = stateRef.current;
+          const pub = await AsyncStorage.getItem('ichat_identity_key_public');
+          const priv = await AsyncStorage.getItem('ichat_identity_key_private');
+          const payload = { chats: current.chats, messages: current.messages, keys: { publicKey: pub, privateKey: priv } };
+          const keyBytes = pbkdf2Sync(savedPass, current.user.email, 2000, 32);
+          const encrypted = encryptSymmetric(JSON.stringify(payload), keyBytes);
+
+          const res = await fetch(`${current.serverUrl}/api/backup`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${current.token}`
+            },
+            body: JSON.stringify({ backup_data: JSON.stringify(encrypted) })
+          });
+          if (res.ok) {
+            const statusStr = new Date().toLocaleString();
+            await AsyncStorage.setItem('ichat_backup_status', statusStr);
+            console.log('[AUTO BACKUP] Daily backup completed successfully at', statusStr);
+          }
+        }
+      } catch (e) {
+        console.error('[AUTO BACKUP ERROR]', e);
+      }
+    }
+
+    const timer = setInterval(checkAutoBackup, 60000); // Check schedule every 60s
+    checkAutoBackup();
+    return () => clearInterval(timer);
+  }, [token, serverUrl]);
+
   // Manage WebSocket connection and messaging router
   useEffect(() => {
     if (!token || !serverUrl) return;

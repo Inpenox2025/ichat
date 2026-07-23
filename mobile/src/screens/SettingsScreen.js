@@ -19,6 +19,23 @@ if (Platform.OS !== 'web') {
   DocumentPicker = require('expo-document-picker');
 }
 
+function SectionHead({ icon, title, C }) {
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+      <Ionicons name={icon} size={20} color={C.accent} />
+      <Text style={{ color: C.text, fontWeight: '700', fontSize: 15, marginLeft: 8 }}>{title}</Text>
+    </View>
+  );
+}
+
+function Card({ children, style, C }) {
+  return (
+    <View style={[{ backgroundColor: C.card, borderWidth: 1, borderColor: C.border, borderRadius: 14, padding: 16, marginBottom: 10 }, style]}>
+      {children}
+    </View>
+  );
+}
+
 export default function SettingsScreen({ navigation, chats, messages, onRestoreCompleted, onLogout, serverUrl, token, user }) {
   const { colors: C, selectedTheme, changeTheme } = useTheme();
 
@@ -293,20 +310,6 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
     ]);
   }
 
-  // ── Helpers ──
-  const SectionHead = ({ icon, title }) => (
-    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-      <Ionicons name={icon} size={20} color={C.accent} />
-      <Text style={{ color: C.text, fontWeight: '700', fontSize: 15, marginLeft: 8 }}>{title}</Text>
-    </View>
-  );
-
-  const Card = ({ children, style }) => (
-    <View style={[{ backgroundColor: C.card, borderWidth: 1, borderColor: C.border, borderRadius: 14, padding: 16, marginBottom: 10 }, style]}>
-      {children}
-    </View>
-  );
-
   const themeLabels = { system: 'System', light: 'Light', dark: 'Dark' };
 
   return (
@@ -335,7 +338,7 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
 
         {/* ── APPEARANCE ── */}
         <View style={{ marginBottom: 24 }}>
-          <SectionHead icon="color-palette-outline" title="Appearance" />
+          <SectionHead C={C} icon="color-palette-outline" title="Appearance" />
           <View style={{ flexDirection: 'row', backgroundColor: C.bgSecondary, borderWidth: 1, borderColor: C.border, borderRadius: 12, padding: 4 }}>
             {['system', 'light', 'dark'].map(mode => (
               <TouchableOpacity
@@ -353,8 +356,8 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
 
         {/* ── STORAGE MANAGEMENT ── */}
         <View style={{ marginBottom: 24 }}>
-          <SectionHead icon="server-outline" title="Storage Management" />
-          <Card>
+          <SectionHead C={C} icon="server-outline" title="Storage Management" />
+          <Card C={C}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6 }}>
               <Text style={{ color: C.textMuted, fontSize: 13 }}>Message Logs</Text>
               <Text style={{ color: C.text, fontWeight: '600', fontSize: 13 }}>{textStorageSize}</Text>
@@ -427,13 +430,14 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
 
         {/* ── BACKUP & RESTORE ── */}
         <View style={{ marginBottom: 24 }}>
-          <SectionHead icon="cloud-upload-outline" title="Backup & Restore" />
+          <SectionHead C={C} icon="cloud-upload-outline" title="Backup & Restore" />
 
           {/* Schedule */}
           <View style={{ marginBottom: 12 }}>
-            <Text style={{ color: C.textMuted, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', marginBottom: 8 }}>Auto Backup Schedule</Text>
+            <Text style={{ color: C.textMuted, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', marginBottom: 4 }}>Auto Backup Schedule</Text>
+            <Text style={{ color: C.textFaint, fontSize: 11, marginBottom: 8 }}>When Daily is active, automatic encrypted backups run every 24 hours (02:00 AM window).</Text>
             <View style={{ flexDirection: 'row', backgroundColor: C.bgSecondary, borderWidth: 1, borderColor: C.border, borderRadius: 10, padding: 4 }}>
-              {[['never', 'Manual'], ['daily', 'Daily']].map(([val, label]) => (
+              {[['never', 'Manual'], ['daily', 'Daily (24h)']].map(([val, label]) => (
                 <TouchableOpacity key={val} style={{ flex: 1, paddingVertical: 9, alignItems: 'center', borderRadius: 8, backgroundColor: backupSchedule === val ? C.accent : 'transparent' }} onPress={() => handleScheduleChange(val)}>
                   <Text style={{ color: backupSchedule === val ? (C.isDark ? '#0c101a' : '#fff') : C.textMuted, fontWeight: '600', fontSize: 13 }}>{label}</Text>
                 </TouchableOpacity>
@@ -442,7 +446,7 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
           </View>
 
           {/* Cloud Account Backup */}
-          <Card>
+          <Card C={C}>
             <Text style={{ color: C.text, fontWeight: '600', fontSize: 14, marginBottom: 4 }}>☁️ Encrypted Cloud Backup</Text>
             <Text style={{ color: C.textMuted, fontSize: 11, marginBottom: 10 }}>Securely back up your chat logs and E2EE keys to your account in the cloud.</Text>
             <TextInput style={{ backgroundColor: C.input, borderWidth: 1, borderColor: C.inputBorder, borderRadius: 8, color: C.text, padding: 10, fontSize: 13, marginBottom: 10 }} secureTextEntry value={backupPass} onChangeText={setBackupPass} placeholder="Set backup passcode (min 4 chars)" placeholderTextColor={C.textFaint} />
@@ -454,7 +458,7 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
           </Card>
 
           {/* Cloud Account Restore */}
-          <Card>
+          <Card C={C}>
             <Text style={{ color: C.text, fontWeight: '600', fontSize: 14, marginBottom: 4 }}>☁️ Restore from Cloud</Text>
             <Text style={{ color: C.textMuted, fontSize: 11, marginBottom: 10 }}>Restore encrypted chat history and security keys from your cloud account.</Text>
             <TextInput style={{ backgroundColor: C.input, borderWidth: 1, borderColor: C.inputBorder, borderRadius: 8, color: C.text, padding: 10, fontSize: 13, marginBottom: 10 }} secureTextEntry value={restorePass} onChangeText={setRestorePass} placeholder="Enter your backup passcode" placeholderTextColor={C.textFaint} />
@@ -464,7 +468,7 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
           </Card>
 
           {/* Local File Export / Import */}
-          <Card>
+          <Card C={C}>
             <Text style={{ color: C.text, fontWeight: '600', fontSize: 14, marginBottom: 10 }}>📂 Local File Export / Import</Text>
             <View style={{ flexDirection: 'row', gap: 8 }}>
               <TouchableOpacity style={{ flex: 1, backgroundColor: C.cardAlt, borderWidth: 1, borderColor: C.borderStrong, borderRadius: 8, padding: 11, alignItems: 'center' }} onPress={handleExportLocalBackup} disabled={loading}>
@@ -481,7 +485,7 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
 
         {/* ── SESSIONS & ACCOUNT ── */}
         <View style={{ marginBottom: 40 }}>
-          <SectionHead icon="shield-outline" title="Sessions & Account" />
+          <SectionHead C={C} icon="shield-outline" title="Sessions & Account" />
 
           <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: C.cardAlt, borderWidth: 1, borderColor: C.border, borderRadius: 12, padding: 16, marginBottom: 10 }} onPress={onLogout}>
             <Ionicons name="log-out-outline" size={20} color={C.text} />
