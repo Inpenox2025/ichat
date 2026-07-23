@@ -12,6 +12,7 @@ export default function AuthScreen({ onAuthSuccess }) {
   const [loading, setLoading] = useState(false);
   const [deviceId, setDeviceId] = useState('');
   const [conflictDevices, setConflictDevices] = useState([]);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   
   // E2EE credentials cached during auth
   const [localKeys, setLocalKeys] = useState(null);
@@ -193,6 +194,25 @@ export default function AuthScreen({ onAuthSuccess }) {
             <TouchableOpacity style={styles.button} onPress={handleSendOtp} disabled={loading}>
               {loading ? <ActivityIndicator color="#0c101a" /> : <Text style={styles.buttonText}>Send Code</Text>}
             </TouchableOpacity>
+
+            {/* Advanced: Server URL override for local testing */}
+            <TouchableOpacity style={styles.advancedToggle} onPress={() => setShowAdvanced(prev => !prev)}>
+              <Text style={styles.advancedToggleText}>{showAdvanced ? '▲ Hide' : '▼ Advanced'} Settings</Text>
+            </TouchableOpacity>
+            {showAdvanced && (
+              <View style={styles.advancedBox}>
+                <Text style={styles.advancedLabel}>Server URL (for local testing)</Text>
+                <TextInput
+                  style={[styles.input, { fontSize: 12, paddingVertical: 8 }]}
+                  value={serverUrl}
+                  onChangeText={setServerUrl}
+                  placeholder="https://ichat.inspenox.in"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <Text style={styles.advancedHint}>Change to http://&lt;your-ip&gt;:3000 for local server testing</Text>
+              </View>
+            )}
           </View>
         )}
 
@@ -395,5 +415,36 @@ const styles = StyleSheet.create({
     color: '#0c101a',
     fontWeight: '700',
     fontSize: 11,
-  }
+  },
+  advancedToggle: {
+    marginTop: 16,
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  advancedToggleText: {
+    color: '#4a5568',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  advancedBox: {
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: '#2d3748',
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 4,
+  },
+  advancedLabel: {
+    color: '#a0aec0',
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    marginBottom: 6,
+  },
+  advancedHint: {
+    color: '#4a5568',
+    fontSize: 11,
+    marginTop: 6,
+    lineHeight: 15,
+  },
 });

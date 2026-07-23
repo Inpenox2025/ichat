@@ -1,15 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import {
   StyleSheet, Text, View, ScrollView, TextInput, TouchableOpacity,
-  Alert, ActivityIndicator, SafeAreaView, StatusBar
+  Alert, ActivityIndicator, SafeAreaView, StatusBar, Platform
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as FileSystem from 'expo-file-system';
-import * as Sharing from 'expo-sharing';
-import * as DocumentPicker from 'expo-document-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { pbkdf2Sync, encryptSymmetric, decryptSymmetric, decodeBase64, encodeBase64 } from '../services/crypto';
 import { useTheme } from '../context/ThemeContext';
+
+// Conditionally import file-system APIs (not available on web)
+let FileSystem = null;
+let Sharing = null;
+let DocumentPicker = null;
+if (Platform.OS !== 'web') {
+  FileSystem = require('expo-file-system');
+  Sharing = require('expo-sharing');
+  DocumentPicker = require('expo-document-picker');
+}
 
 export default function SettingsScreen({ navigation, chats, messages, onRestoreCompleted, onLogout, serverUrl, token, user }) {
   const { colors: C, selectedTheme, changeTheme } = useTheme();
@@ -47,6 +54,10 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
   async function calculateStorageSizes() {
     const rawText = JSON.stringify(messages) + JSON.stringify(chats);
     setTextStorageSize(`${(rawText.length / 1024).toFixed(1)} KB`);
+    if (Platform.OS === 'web') {
+      setMediaStorageSize('N/A (web)');
+      return;
+    }
     try {
       const files = await FileSystem.readDirectoryAsync(FileSystem.documentDirectory);
       let total = 0;
@@ -71,6 +82,7 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
   }
 
   async function handleDeleteFile(chatUsername, msg) {
+    if (Platform.OS === 'web') { Alert.alert('Not available', 'File management is not available on web.'); return; }
     Alert.alert('Delete File', `Delete "${msg.media.filename}" to free storage?`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: async () => {
@@ -86,9 +98,11 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
     Alert.alert('Clear Chat Data', `Delete all messages for @${chatUsername}?`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Clear Chat', style: 'destructive', onPress: async () => {
-        const chatMsgs = messages.filter(m => m.chatPartner === chatUsername);
-        for (const m of chatMsgs) {
-          if (m.media) await FileSystem.deleteAsync(`${FileSystem.documentDirectory}${m.media.filename}`, { idempotent: true });
+        if (Platform.OS !== 'web') {
+          const chatMsgs = messages.filter(m => m.chatPartner === chatUsername);
+          for (const m of chatMsgs) {
+            if (m.media) await FileSystem.deleteAsync(`${FileSystem.documentDirectory}${m.media.filename}`, { idempotent: true });
+          }
         }
         const updated = messages.filter(m => m.chatPartner !== chatUsername);
         await AsyncStorage.setItem('ichat_messages', JSON.stringify(updated));
@@ -98,6 +112,7 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
   }
 
   async function handleClearMedia() {
+    if (Platform.OS === 'web') { Alert.alert('Not available', 'Media cache management is not available on web.'); return; }
     Alert.alert('Clear Media Cache', 'Delete all decrypted media from this phone? Message logs will be kept.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Clear', style: 'destructive', onPress: async () => {
@@ -126,6 +141,10 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
   }
 
   async function handleExportLocalBackup() {
+    if (Platform.OS === 'web') {
+      Alert.alert('Export on Web', 'On web, use the desktop app backup feature instead.');
+      return;
+    }
     if (!backupPass || backupPass.length < 4) {
       Alert.alert('Error', 'Enter a backup password (at least 4 characters).');
       return;
@@ -149,6 +168,10 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
   }
 
   async function handleImportLocalBackup() {
+    if (Platform.OS === 'web') {
+      Alert.alert('Import on Web', 'On web, use the desktop app restore feature instead.');
+      return;
+    }
     if (!restorePass) { Alert.alert('Error', 'Enter your backup password first.'); return; }
     setLoading(true);
     try {
@@ -200,8 +223,10 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
           const data = await res.json();
           if (!res.ok) throw new Error(data.error || 'Deletion failed');
           await AsyncStorage.clear();
-          const files = await FileSystem.readDirectoryAsync(FileSystem.documentDirectory);
-          for (const f of files) await FileSystem.deleteAsync(`${FileSystem.documentDirectory}${f}`, { idempotent: true });
+          if (Platform.OS !== 'web') {
+            const files = await FileSystem.readDirectoryAsync(FileSystem.documentDirectory);
+            for (const f of files) await FileSystem.deleteAsync(`${FileSystem.documentDirectory}${f}`, { idempotent: true });
+          }
           onLogout();
         } catch (err) { Alert.alert('Error', err.message); }
         finally { setLoading(false); }
