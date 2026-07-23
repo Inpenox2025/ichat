@@ -187,8 +187,9 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
 
       const pub = await AsyncStorage.getItem('ichat_identity_key_public');
       const priv = await AsyncStorage.getItem('ichat_identity_key_private');
-      const payload = { chats, messages, keys: { publicKey: pub, privateKey: priv } };
-      const keyBytes = pbkdf2Sync(backupPass, user.email, 2000, 32);
+      const payload = { chats: chats || [], messages: messages || [], keys: { publicKey: pub, privateKey: priv } };
+      const userEmail = user?.email || 'default_user';
+      const keyBytes = pbkdf2Sync(backupPass, userEmail, 2000, 32);
       const encrypted = encryptSymmetric(JSON.stringify(payload), keyBytes);
 
       setBackupStatusMsg('☁️ Step 2/3: Uploading encrypted payload to cloud account...');
@@ -233,19 +234,30 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
       await new Promise(r => setTimeout(r, 50));
 
       const blob = JSON.parse(data.backup_data);
-      const keyBytes = pbkdf2Sync(restorePass, user.email, 2000, 32);
+      const userEmail = user?.email || 'default_user';
+      const keyBytes = pbkdf2Sync(restorePass, userEmail, 2000, 32);
       const decryptedStr = decryptSymmetric(blob.ciphertext, blob.nonce, keyBytes);
       const decrypted = JSON.parse(decryptedStr);
 
       setRestoreStatusMsg('💾 Step 3/3: Restoring chats, messages & keys to database...');
       await new Promise(r => setTimeout(r, 50));
 
-      await AsyncStorage.setItem('ichat_identity_key_public', decrypted.keys.publicKey);
-      await AsyncStorage.setItem('ichat_identity_key_private', decrypted.keys.privateKey);
-      await AsyncStorage.setItem('ichat_chats', JSON.stringify(decrypted.chats));
-      await AsyncStorage.setItem('ichat_messages', JSON.stringify(decrypted.messages));
+      const safeChats = Array.isArray(decrypted?.chats) ? decrypted.chats : [];
+      let safeMsgs = [];
+      if (Array.isArray(decrypted?.messages)) {
+        safeMsgs = decrypted.messages;
+      } else if (decrypted?.messages && typeof decrypted.messages === 'object') {
+        safeMsgs = Object.values(decrypted.messages).flat();
+      }
 
-      onRestoreCompleted(decrypted.chats, decrypted.messages);
+      if (decrypted?.keys?.publicKey && decrypted?.keys?.privateKey) {
+        await AsyncStorage.setItem('ichat_identity_key_public', decrypted.keys.publicKey);
+        await AsyncStorage.setItem('ichat_identity_key_private', decrypted.keys.privateKey);
+      }
+      await AsyncStorage.setItem('ichat_chats', JSON.stringify(safeChats));
+      await AsyncStorage.setItem('ichat_messages', JSON.stringify(safeMsgs));
+
+      onRestoreCompleted(safeChats, safeMsgs);
       setRestorePass('');
       setRestoreStatusMsg('✅ Step 3/3: Restore completed successfully!');
       Alert.alert('Restore Complete', 'Encrypted chat history and keys restored successfully!');

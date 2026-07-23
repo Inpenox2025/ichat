@@ -767,14 +767,30 @@ export default function App() {
     const savedChats = await AsyncStorage.getItem('ichat_chats');
     const savedGroups = await AsyncStorage.getItem('ichat_groups');
     const savedMsgs = await AsyncStorage.getItem('ichat_messages');
-    if (savedChats) setChats(JSON.parse(savedChats));
-    if (savedGroups) setGroups(JSON.parse(savedGroups));
-    if (savedMsgs) setMessages(JSON.parse(savedMsgs));
+    if (savedChats) {
+      try { setChats(JSON.parse(savedChats)); } catch (e) {}
+    }
+    if (savedGroups) {
+      try { setGroups(JSON.parse(savedGroups)); } catch (e) {}
+    }
+    if (savedMsgs) {
+      try {
+        const parsed = JSON.parse(savedMsgs);
+        setMessages(Array.isArray(parsed) ? parsed : (typeof parsed === 'object' ? Object.values(parsed).flat() : []));
+      } catch (e) {}
+    }
   }
 
-  function handleRestoreCompleted(restoredChats, restoredMessages) {
-    setChats(restoredChats);
-    setMessages(restoredMessages);
+  function handleRestoreCompleted(restoredChats = [], restoredMessages = []) {
+    const safeChats = Array.isArray(restoredChats) ? restoredChats : [];
+    let safeMsgs = [];
+    if (Array.isArray(restoredMessages)) {
+      safeMsgs = restoredMessages;
+    } else if (restoredMessages && typeof restoredMessages === 'object') {
+      safeMsgs = Object.values(restoredMessages).flat();
+    }
+    setChats(safeChats);
+    setMessages(safeMsgs);
   }
 
   async function handleLogout() {

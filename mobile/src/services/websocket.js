@@ -57,6 +57,7 @@ function stopHttpPolling() {
 }
 
 export function connectWebSocket(serverUrl, token) {
+  if (!serverUrl) return;
   currentServerUrl = serverUrl;
   currentToken = token;
 
@@ -68,7 +69,7 @@ export function connectWebSocket(serverUrl, token) {
 
   // On Vercel deployments (*.vercel.app or *.inspenox.in), WebSockets are not supported by serverless functions.
   // Switch to HTTP polling directly to avoid console WebSocket handshake errors.
-  const isVercelHost = serverUrl.includes('inspenox.in') || serverUrl.includes('vercel.app');
+  const isVercelHost = typeof serverUrl === 'string' && (serverUrl.includes('inspenox.in') || serverUrl.includes('vercel.app'));
   if (isVercelHost || reconnectAttempts >= MAX_WS_ATTEMPTS) {
     startHttpPolling(serverUrl, token);
     return;

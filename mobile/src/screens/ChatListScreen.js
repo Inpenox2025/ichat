@@ -72,21 +72,33 @@ export default function ChatListScreen({
   const toggleSelectGroup = (id) => setSelectedGroups(prev =>
     prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
 
-  const mainChats = chats.filter(c => c && (c.status === 'accepted' || c.status === 'pending_outgoing' || !c.status));
-  const pendingRequests = chats.filter(c => c && c.status === 'pending_incoming');
+  function getPartnerMessages(partnerId) {
+    if (Array.isArray(messages)) {
+      return messages.filter(m => m && (m.chatPartner === partnerId || m.recipient === partnerId || m.sender === partnerId));
+    }
+    if (messages && typeof messages === 'object') {
+      return messages[partnerId] || [];
+    }
+    return [];
+  }
+
+  const mainChats = (chats || []).filter(c => c && (c.status === 'accepted' || c.status === 'pending_outgoing' || !c.status));
+  const pendingRequests = (chats || []).filter(c => c && c.status === 'pending_incoming');
   const sortedChats = [...mainChats].sort((a, b) => {
-    const lA = messages.filter(m => m.chatPartner === a.username).slice(-1)[0];
-    const lB = messages.filter(m => m.chatPartner === b.username).slice(-1)[0];
+    const msgsA = getPartnerMessages(a.username);
+    const msgsB = getPartnerMessages(b.username);
+    const lA = msgsA.slice(-1)[0];
+    const lB = msgsB.slice(-1)[0];
     return new Date(lB?.timestamp || 0) - new Date(lA?.timestamp || 0);
   });
-  const filteredGroups = groups.filter(g => g?.name?.toLowerCase().includes(groupSearchQuery.toLowerCase().trim()));
-  const totalUnreadGroups = groups.reduce((acc, g) => acc + (g.unreadCount || 0), 0);
-  const totalUnreadChats = chats.reduce((acc, c) => acc + (c.unreadCount || 0), 0);
+  const filteredGroups = (groups || []).filter(g => g?.name?.toLowerCase().includes(groupSearchQuery.toLowerCase().trim()));
+  const totalUnreadGroups = (groups || []).reduce((acc, g) => acc + (g.unreadCount || 0), 0);
+  const totalUnreadChats = (chats || []).reduce((acc, c) => acc + (c.unreadCount || 0), 0);
 
   function renderChatItem({ item }) {
     const isSelected = selectedChats.includes(item.username);
     const selMode = selectedChats.length > 0;
-    const chatMsgs = messages.filter(m => m.chatPartner === item.username);
+    const chatMsgs = getPartnerMessages(item.username);
     const last = chatMsgs.slice(-1)[0];
     const displayMsg = last ? (last.media ? `📷 ${last.media.filename}` : last.body) : 'No messages yet';
     const displayTime = last ? new Date(last.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
@@ -121,7 +133,7 @@ export default function ChatListScreen({
   function renderGroupItem({ item }) {
     const isSelected = selectedGroups.includes(item.id);
     const selMode = selectedGroups.length > 0;
-    const groupMsgs = messages.filter(m => m.chatPartner === item.id);
+    const groupMsgs = getPartnerMessages(item.id);
     const last = groupMsgs.slice(-1)[0];
     const displayMsg = last ? `${last.sender === currentUsername ? 'You' : '@' + last.sender}: ${last.media ? '📷 File' : last.body}` : 'No messages yet';
     const displayTime = last ? new Date(last.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';

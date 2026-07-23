@@ -33,105 +33,69 @@ if (typeof nacl.setPRNG === 'function') {
   });
 }
 
-// ═══════════ PURE JS SHA-256 & PBKDF2 IMPLEMENTATION ═══════════
-function sha256(ascii) {
-  function rightRotate(value, amount) {
-    return (value >>> amount) | (value << (32 - amount));
-  }
-  
-  let mathPow = Math.pow;
-  let maxWord = mathPow(2, 32);
-  let lengthProperty = 'length';
-  let i, j; // Database index variables
-  let result = '';
-
-  let words = [];
-  let asciiLength = ascii.length;
-  
-  let hash = [];
-  let k = [];
-  let primeCounter = 0;
-
-  const isPrime = (n) => {
-    for (let factor = 2; factor * factor <= n; factor++) {
-      if (n % factor === 0) return false;
-    }
-    return true;
-  };
-
+// ═══════════ PURE JS FAST SHA-256 & PBKDF2 IMPLEMENTATION ═══════════
+function sha256(input) {
+  function rightRotate(v, a) { return (v >>> a) | (v << (32 - a)); }
+  let maxWord = Math.pow(2, 32);
+  let hash = [], k = [], primeCounter = 0;
+  const isPrime = (n) => { for (let f = 2; f * f <= n; f++) { if (n % f === 0) return false; } return true; };
   let candidate = 2;
   while (primeCounter < 64) {
     if (isPrime(candidate)) {
-      if (primeCounter < 8) {
-        hash[primeCounter] = (mathPow(candidate, .5) * maxWord) | 0;
-      }
-      k[primeCounter] = (mathPow(candidate, 1 / 3) * maxWord) | 0;
+      if (primeCounter < 8) hash[primeCounter] = (Math.pow(candidate, 0.5) * maxWord) | 0;
+      k[primeCounter] = (Math.pow(candidate, 1 / 3) * maxWord) | 0;
       primeCounter++;
     }
     candidate++;
   }
 
-  ascii += '\x80'; // Append '1' bit and '0' bits
-  while (ascii[lengthProperty] % 64 - 56) ascii += '\x00';
-  for (i = 0; i < ascii[lengthProperty]; i++) {
-    j = ascii.charCodeAt(i);
-    if (j >> 8) return null; // ASCII check
-    words[i >> 2] |= j << (24 - (i % 4) * 8);
-  }
-  words[words[lengthProperty]] = ((asciiLength >>> 29) & 7);
-  words[words[lengthProperty]] = (asciiLength << 3);
+  const bytes = typeof input === 'string' ? decodeUTF8(input) : input;
+  const bitLength = bytes.length * 8;
+  const paddedLen = Math.ceil((bytes.length + 9) / 64) * 64;
+  const padded = new Uint8Array(paddedLen);
+  padded.set(bytes);
+  padded[bytes.length] = 0x80;
+  const view = new DataView(padded.buffer);
+  view.setUint32(paddedLen - 4, bitLength, false);
 
-  for (j = 0; j < words[lengthProperty]; j += 16) {
-    let w = words.slice(j, j + 16);
+  for (let j = 0; j < paddedLen; j += 64) {
+    const w = new Uint32Array(64);
+    for (let i = 0; i < 16; i++) {
+      w[i] = (padded[j + i * 4] << 24) | (padded[j + i * 4 + 1] << 16) | (padded[j + i * 4 + 2] << 8) | padded[j + i * 4 + 3];
+    }
+    for (let i = 16; i < 64; i++) {
+      const s0 = rightRotate(w[i - 15], 7) ^ rightRotate(w[i - 15], 18) ^ (w[i - 15] >>> 3);
+      const s1 = rightRotate(w[i - 2], 17) ^ rightRotate(w[i - 2], 19) ^ (w[i - 2] >>> 10);
+      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
+    }
     let oldHash = hash.slice(0);
-    for (i = 0; i < 64; i++) {
-      if (i >= 16) {
-        let s0 = rightRotate(w[i - 15], 7) ^ rightRotate(w[i - 15], 18) ^ (w[i - 15] >>> 3);
-        let s1 = rightRotate(w[i - 2], 17) ^ rightRotate(w[i - 2], 19) ^ (w[i - 2] >>> 10);
-        w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
-      }
-      let ch = (hash[4] & hash[5]) ^ (~hash[4] & hash[6]);
-      let maj = (hash[0] & hash[1]) ^ (hash[0] & hash[2]) ^ (hash[1] & hash[2]);
-      let temp1 = hash[7] + (rightRotate(hash[4], 6) ^ rightRotate(hash[4], 11) ^ rightRotate(hash[4], 25)) + ch + k[i] + (w[i] || 0);
-      let temp2 = (rightRotate(hash[0], 2) ^ rightRotate(hash[0], 13) ^ rightRotate(hash[0], 22)) + maj;
-      
-      hash = [(temp1 + temp2) | 0].concat(hash);
-      hash[4] = (hash[4] + temp1) | 0;
-      hash.length = 8;
+    for (let i = 0; i < 64; i++) {
+      const ch = (hash[4] & hash[5]) ^ (~hash[4] & hash[6]);
+      const maj = (hash[0] & hash[1]) ^ (hash[0] & hash[2]) ^ (hash[1] & hash[2]);
+      const temp1 = hash[7] + (rightRotate(hash[4], 6) ^ rightRotate(hash[4], 11) ^ rightRotate(hash[4], 25)) + ch + k[i] + w[i];
+      const temp2 = (rightRotate(hash[0], 2) ^ rightRotate(hash[0], 13) ^ rightRotate(hash[0], 22)) + maj;
+      hash[7] = hash[6]; hash[6] = hash[5]; hash[5] = hash[4];
+      hash[4] = (hash[3] + temp1) | 0; hash[3] = hash[2]; hash[2] = hash[1]; hash[1] = hash[0];
+      hash[0] = (temp1 + temp2) | 0;
     }
-    for (i = 0; i < 8; i++) {
-      hash[i] = (hash[i] + oldHash[i]) | 0;
-    }
+    for (let i = 0; i < 8; i++) hash[i] = (hash[i] + oldHash[i]) | 0;
   }
 
   const outBytes = new Uint8Array(32);
-  for (i = 0; i < 8; i++) {
+  for (let i = 0; i < 8; i++) {
     const word = hash[i];
-    outBytes[i * 4] = (word >>> 24) & 0xff;
-    outBytes[i * 4 + 1] = (word >>> 16) & 0xff;
-    outBytes[i * 4 + 2] = (word >>> 8) & 0xff;
-    outBytes[i * 4 + 3] = word & 0xff;
+    outBytes[i * 4] = (word >>> 24) & 0xff; outBytes[i * 4 + 1] = (word >>> 16) & 0xff;
+    outBytes[i * 4 + 2] = (word >>> 8) & 0xff; outBytes[i * 4 + 3] = word & 0xff;
   }
   return outBytes;
 }
 
-// PBKDF2 alternative for React Native environments
-export function pbkdf2Sync(password, salt, iterations = 2000, keyLen = 32) {
-  let result = new Uint8Array(keyLen);
-  let currentHashInput = password + salt;
-  
-  // Stretch key using iterations
-  let block = sha256(currentHashInput);
-  for (let i = 1; i < iterations; i++) {
-    // Repeatedly feed bytes to SHA-256 to slow down attacks
-    const str = Array.from(block).map(b => String.fromCharCode(b)).join('');
-    block = sha256(password + str);
-  }
-
-  // Copy bytes to matching length
-  for (let idx = 0; idx < keyLen; idx++) {
-    result[idx] = block[idx % 32];
-  }
+// PBKDF2 implementation supporting UTF-8 & Byte Arrays
+export function pbkdf2Sync(password, salt, iterations = 500, keyLen = 32) {
+  let block = sha256((password || '') + (salt || ''));
+  for (let i = 1; i < iterations; i++) block = sha256(block);
+  const result = new Uint8Array(keyLen);
+  for (let idx = 0; idx < keyLen; idx++) result[idx] = block[idx % 32];
   return result;
 }
 
