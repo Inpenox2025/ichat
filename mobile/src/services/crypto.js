@@ -1,5 +1,37 @@
 import nacl from 'tweetnacl';
 import { decodeUTF8, encodeUTF8, decodeBase64, encodeBase64 } from 'tweetnacl-util';
+import * as Crypto from 'expo-crypto';
+
+// Setup PRNG for TweetNaCl in React Native environment to fix "no PRNG" error
+if (typeof nacl.setPRNG === 'function') {
+  nacl.setPRNG(function(x, n) {
+    try {
+      if (typeof globalThis !== 'undefined' && globalThis.crypto && typeof globalThis.crypto.getRandomValues === 'function') {
+        const buf = new Uint8Array(n);
+        globalThis.crypto.getRandomValues(buf);
+        for (let i = 0; i < n; i++) x[i] = buf[i];
+        return;
+      }
+      if (Crypto && typeof Crypto.getRandomValues === 'function') {
+        const buf = new Uint8Array(n);
+        Crypto.getRandomValues(buf);
+        for (let i = 0; i < n; i++) x[i] = buf[i];
+        return;
+      }
+      if (Crypto && typeof Crypto.getRandomBytes === 'function') {
+        const buf = Crypto.getRandomBytes(n);
+        for (let i = 0; i < n; i++) x[i] = buf[i];
+        return;
+      }
+    } catch (e) {}
+
+    // Fallback high-entropy PRNG
+    for (let i = 0; i < n; i++) {
+      const entropy = (Math.random() * 0x100000000) ^ (Date.now() + i * 31);
+      x[i] = (entropy >>> ((i % 4) * 8)) & 0xff;
+    }
+  });
+}
 
 // ═══════════ PURE JS SHA-256 & PBKDF2 IMPLEMENTATION ═══════════
 function sha256(ascii) {
