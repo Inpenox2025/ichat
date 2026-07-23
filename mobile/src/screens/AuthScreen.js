@@ -4,7 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { generateIdentityKeys } from '../services/crypto';
 
 export default function AuthScreen({ onAuthSuccess }) {
-  const [serverUrl, setServerUrl] = useState('http://10.0.2.2:3000'); // Default Android Emulator host
+  const [serverUrl, setServerUrl] = useState('https://ichat.inspenox.in'); // Default Live Server
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState('');
   const [username, setUsername] = useState('');
