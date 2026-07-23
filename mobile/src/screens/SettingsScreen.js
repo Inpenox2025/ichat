@@ -316,15 +316,23 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
       { text: 'Logout All', style: 'destructive', onPress: async () => {
         setLoading(true);
         try {
-          const res = await fetch(`${serverUrl}/api/auth/logout-all-devices`, {
-            method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
+          const res = await fetch(`${serverUrl}/api/auth/logout-all-devices?action=logout-all-devices`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ action: 'logout-all-devices' })
           });
           const data = await res.json();
-          if (!res.ok) throw new Error(data.error || 'Failed');
-          await AsyncStorage.clear();
-          onLogout();
-        } catch (err) { Alert.alert('Error', err.message); }
-        finally { setLoading(false); }
+          if (!res.ok) throw new Error(data.error || 'Failed to logout all devices');
+          Alert.alert('Success', 'All device sessions have been revoked.');
+          await onLogout();
+        } catch (err) {
+          Alert.alert('Error', err.message);
+        } finally {
+          setLoading(false);
+        }
       }}
     ]);
   }
