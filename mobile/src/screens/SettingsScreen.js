@@ -51,6 +51,21 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
   const [backupStatusMsg, setBackupStatusMsg] = useState('');
   const [restoreStatusMsg, setRestoreStatusMsg] = useState('');
 
+  // Auto-dismiss success/error status messages after 4 seconds
+  useEffect(() => {
+    if (backupStatusMsg && (backupStatusMsg.startsWith('✅') || backupStatusMsg.startsWith('❌'))) {
+      const timer = setTimeout(() => setBackupStatusMsg(''), 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [backupStatusMsg]);
+
+  useEffect(() => {
+    if (restoreStatusMsg && (restoreStatusMsg.startsWith('✅') || restoreStatusMsg.startsWith('❌'))) {
+      const timer = setTimeout(() => setRestoreStatusMsg(''), 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [restoreStatusMsg]);
+
   useEffect(() => {
     AsyncStorage.getItem('ichat_backup_schedule').then(s => { if (s) setBackupSchedule(s); });
   }, []);
