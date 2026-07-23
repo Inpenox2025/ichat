@@ -43,7 +43,7 @@ module.exports = async function handler(req, res) {
     // ----------------------------------------------------
     // ACTION: GET PUBLIC KEYS OF USER DEVICES
     // ----------------------------------------------------
-    if (req.query.action === 'keys') {
+    if (req.query.action === 'keys' || req.query.username) {
       const { username } = req.query;
       if (!username) {
         return res.status(400).json({ error: 'Username query parameter is required' });

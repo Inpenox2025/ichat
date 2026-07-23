@@ -763,7 +763,7 @@ async function sendE2EEMessage(recipientUsername, bodyText, mediaData = null) {
   // 1. Fetch public keys of recipient's devices and my other devices
   let recipientKeys, senderOtherKeys;
   try {
-    const res = await fetch(`${API_BASE}/api/users/keys?username=${recipientUsername}`, {
+    const res = await fetch(`${API_BASE}/api/users/keys?action=keys&username=${recipientUsername}`, {
       headers: { 'Authorization': `Bearer ${state.token}` }
     });
     const result = await res.json();
@@ -872,7 +872,7 @@ async function sendE2EEGroupMessage(group, bodyText, mediaData = null) {
   // Fetch device keys for all other members in the group
   for (const member of otherMembers) {
     try {
-      const res = await fetch(`${API_BASE}/api/users/keys?username=${member}`, {
+      const res = await fetch(`${API_BASE}/api/users/keys?action=keys&username=${member}`, {
         headers: { 'Authorization': `Bearer ${state.token}` }
       });
       const result = await res.json();
@@ -890,7 +890,7 @@ async function sendE2EEGroupMessage(group, bodyText, mediaData = null) {
 
   // Also encrypt session key for my own OTHER registered devices
   try {
-    const myRes = await fetch(`${API_BASE}/api/users/keys?username=${state.user.username}`, {
+    const myRes = await fetch(`${API_BASE}/api/users/keys?action=keys&username=${state.user.username}`, {
       headers: { 'Authorization': `Bearer ${state.token}` }
     });
     const myResult = await myRes.json();
