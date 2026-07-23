@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, ScrollView, TextInput, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
+import * as DocumentPicker from 'expo-document-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { pbkdf2Sync, encryptSymmetric, decryptSymmetric, decodeBase64, encodeBase64 } from '../services/crypto';
 
@@ -295,6 +297,82 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
     }
   }
 
+  async function handleExportLocalBackup() {
+    if (!backupPass || backupPass.length < 4) {
+      Alert.alert('Error', 'Please enter a backup password (at least 4 characters) in the Upload field first');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const pub = await AsyncStorage.getItem('ichat_identity_key_public');
+      const priv = await AsyncStorage.getItem('ichat_identity_key_private');
+
+      const payloadObject = {
+        chats,
+        messages,
+        keys: { publicKey: pub, privateKey: priv }
+      };
+
+      const salt = user.email;
+      const keyBytes = pbkdf2Sync(backupPass, salt, 2000, 32);
+      const encrypted = encryptSymmetric(JSON.stringify(payloadObject), keyBytes);
+      const backupBlobString = JSON.stringify(encrypted);
+
+      const fileUri = `${FileSystem.cacheDirectory}ichat_backup_${new Date().toISOString().slice(0, 10)}.json`;
+      await FileSystem.writeAsStringAsync(fileUri, backupBlobString, { encoding: FileSystem.EncodingType.UTF8 });
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, { mimeType: 'application/json', dialogTitle: 'Save Backup File (Google Drive / Files)' });
+      } else {
+        Alert.alert('Exported', `Backup file saved to cache: ${fileUri}`);
+      }
+    } catch (err) {
+      Alert.alert('Export failed', err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleImportLocalBackup() {
+    if (!restorePass) {
+      Alert.alert('Error', 'Please enter your backup password in the Restore field first');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const result = await DocumentPicker.getDocumentAsync({ type: '*/*' });
+      if (result.canceled || !result.assets || result.assets.length === 0) {
+        setLoading(false);
+        return;
+      }
+
+      const fileUri = result.assets[0].uri;
+      const backupBlobString = await FileSystem.readAsStringAsync(fileUri, { encoding: FileSystem.EncodingType.UTF8 });
+      const encryptedBlob = JSON.parse(backupBlobString);
+
+      const salt = user.email;
+      const keyBytes = pbkdf2Sync(restorePass, salt, 2000, 32);
+
+      const decryptedStr = decryptSymmetric(encryptedBlob.ciphertext, encryptedBlob.nonce, keyBytes);
+      const restored = JSON.parse(decryptedStr);
+
+      await AsyncStorage.setItem('ichat_identity_key_public', restored.keys.publicKey);
+      await AsyncStorage.setItem('ichat_identity_key_private', restored.keys.privateKey);
+      await AsyncStorage.setItem('ichat_chats', JSON.stringify(restored.chats));
+      await AsyncStorage.setItem('ichat_messages', JSON.stringify(restored.messages));
+
+      onRestoreCompleted(restored.chats, restored.messages);
+      setRestorePass('');
+      Alert.alert('Success', 'Chat history and keys successfully restored from file!');
+    } catch (err) {
+      Alert.alert('Import failed', 'Decryption password mismatched or invalid file format.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function handleDeleteAccount() {
     Alert.alert(
       'Danger Zone',
@@ -512,6 +590,20 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
           <TouchableOpacity style={[styles.backupBtn, {backgroundColor: '#1a202c', borderWidth: 1, borderColor: '#4a5568'}]} onPress={handleRestore} disabled={loading}>
             <Text style={[styles.backupBtnText, {color: '#fff'}]}>Download & Decrypt</Text>
           </TouchableOpacity>
+        </View>
+
+        {/* Local Encrypted Backup File Export & Import */}
+        <View style={styles.backupCard}>
+          <Text style={styles.backupTitle}>Export / Import Encrypted File</Text>
+          <Text style={{ color: '#a0aec0', fontSize: 11, marginBottom: 10 }}>Share backup file to Google Drive, Files, or cloud app, or import an existing backup file.</Text>
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            <TouchableOpacity style={[styles.backupBtn, { flex: 1, backgroundColor: '#1a202c', borderWidth: 1, borderColor: '#00f2fe' }]} onPress={handleExportLocalBackup} disabled={loading}>
+              <Text style={[styles.backupBtnText, { color: '#00f2fe' }]}>Share File</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.backupBtn, { flex: 1, backgroundColor: '#1a202c', borderWidth: 1, borderColor: '#a0aec0' }]} onPress={handleImportLocalBackup} disabled={loading}>
+              <Text style={[styles.backupBtnText, { color: '#fff' }]}>Import File</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         <Text style={styles.backupStatus}>Last Backup Uploaded: {backupStatus}</Text>
