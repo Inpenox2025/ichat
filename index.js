@@ -956,6 +956,24 @@ async function sendE2EEGroupMessage(group, bodyText, mediaData = null) {
   }
 }
 
+// Send Typing Indicator Signal to Recipient
+function sendTypingIndicator(recipient, isTyping) {
+  if (!recipient) return;
+  const packet = {
+    type: 'typing',
+    sender: state.user?.username || '',
+    recipient,
+    isTyping,
+    status: isTyping
+  };
+
+  if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+    state.socket.send(JSON.stringify(packet));
+  } else if (state.token) {
+    apiCall('/api/messages', 'POST', { recipient, packet }).catch(() => {});
+  }
+}
+
 // Poll transient queue for incoming messages when WebSocket is offline or in serverless environments
 async function pollTransientQueue() {
   if (!state.token) return;
@@ -1002,6 +1020,28 @@ async function handleIncomingMessage(data) {
       renderRequestsList();
       renderActiveChat();
       showToast(`@${partner} accepted your message request!`, 'success');
+    }
+    return;
+  }
+
+  // 0A-2. Handle Typing Indicator signal
+  if (data.type === 'typing') {
+    const { sender, isTyping, status } = data;
+    const activeState = typeof isTyping !== 'undefined' ? isTyping : status;
+
+    if (sender === state.activeChatPartner) {
+      const statusText = document.getElementById('chatTitleStatusText');
+      const typingText = document.getElementById('chatTitleTypingText');
+      if (activeState) {
+        if (statusText) statusText.style.display = 'none';
+        if (typingText) {
+          typingText.innerText = 'is typing...';
+          typingText.style.display = 'inline-block';
+        }
+      } else {
+        if (statusText) statusText.style.display = 'inline-block';
+        if (typingText) typingText.style.display = 'none';
+      }
     }
     return;
   }

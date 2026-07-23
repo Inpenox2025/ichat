@@ -229,8 +229,9 @@ export default function App() {
       }
 
       if (data.type === 'typing') {
-        const { sender, status } = data;
-        if (status) {
+        const { sender, isTyping, status } = data;
+        const activeState = typeof isTyping !== 'undefined' ? isTyping : status;
+        if (activeState) {
           setTypingPartner(sender);
         } else {
           setTypingPartner(null);
@@ -443,7 +444,26 @@ export default function App() {
     const current = stateRef.current;
 
     if (actionObj.type === 'typing') {
-      sendSocketMessage(actionObj);
+      const isTypingState = typeof actionObj.isTyping !== 'undefined' ? actionObj.isTyping : actionObj.status;
+      const packet = {
+        type: 'typing',
+        sender: current.user?.username || '',
+        recipient: actionObj.recipient,
+        isTyping: isTypingState,
+        status: isTypingState
+      };
+
+      const sent = sendSocketMessage(packet);
+      if (!sent && current.token && current.serverUrl) {
+        fetch(`${current.serverUrl}/api/messages`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${current.token}`
+          },
+          body: JSON.stringify({ recipient: actionObj.recipient, packet })
+        }).catch(() => {});
+      }
       return;
     }
 
