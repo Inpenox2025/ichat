@@ -89,13 +89,13 @@
             <button type="button" class="btn btn-outline" id="btnCancelReplace">Cancel</button>
           </div>
         </div>
-<!-- 
+
         <div class="auth-footer">
           <button type="button" class="btn btn-outline btn-sm btn-block" id="btnInitDb" style="margin-bottom: 16px;">
             <i data-feather="database"></i> Initialize Database
           </button>
           <p><i data-feather="lock"></i> Keys generated locally on your device</p>
-        </div> -->
+        </div>
       </div>
     </div>
 
@@ -145,6 +145,9 @@
               </div>
             </div>
             <div class="header-actions">
+              <button class="icon-btn" id="btnOpenCreateGroupModal" title="Create Group">
+                <i data-feather="plus-circle"></i>
+              </button>
               <button class="icon-btn" id="btnSettings" title="Settings">
                 <i data-feather="settings"></i>
               </button>
@@ -202,7 +205,36 @@
               </div>
             </div>
 
-            <!-- VIEW 2: REQUESTS (Message Requests 100+ Scalable View) -->
+            <!-- VIEW 2: GROUPS (E2EE Multi-User Group Chats) -->
+            <div id="groupsView" class="sidebar-tab-view">
+              <div class="groups-view-header">
+                <div class="groups-view-title">
+                  <i data-feather="users"></i>
+                  <h4>Group Chats</h4>
+                  <span class="groups-badge" id="groupsCountBadge">0</span>
+                </div>
+                <button type="button" class="btn btn-primary btn-xs" id="btnCreateGroupHeader" title="Create New Group">
+                  <i data-feather="plus"></i> New Group
+                </button>
+              </div>
+
+              <!-- Filter Search Input for Groups -->
+              <div class="groups-filter-wrapper">
+                <i data-feather="search" class="search-icon"></i>
+                <input type="text" id="groupSearchInput" placeholder="Search group chats..." autocomplete="off">
+              </div>
+
+              <!-- Groups List Container -->
+              <div class="groups-list-container" id="groupsContainer">
+                <div class="chat-list-empty">
+                  <i data-feather="users" class="empty-icon"></i>
+                  <p>No group chats yet.</p>
+                  <span>Create a group with your accepted contacts.</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- VIEW 3: REQUESTS (Message Requests Scalable View) -->
             <div id="requestsView" class="sidebar-tab-view">
               <!-- Requests Selection Action Bar (hidden by default) -->
               <div class="selection-action-bar" id="requestsSelectionBar" style="display: none;">
@@ -248,7 +280,7 @@
 
           </div>
 
-          <!-- SIDEBAR BOTTOM NAV TABS (Home vs Requests) -->
+          <!-- SIDEBAR BOTTOM NAV TABS (Home, Groups, Requests) -->
           <nav class="sidebar-bottom-nav" id="sidebarBottomNav">
             <button type="button" class="nav-tab active" id="tabNavHome">
               <div class="nav-tab-icon-wrapper">
@@ -256,6 +288,13 @@
                 <span class="nav-tab-badge" id="homeUnreadBadge" style="display: none;">0</span>
               </div>
               <span>Home</span>
+            </button>
+            <button type="button" class="nav-tab" id="tabNavGroups">
+              <div class="nav-tab-icon-wrapper">
+                <i data-feather="users"></i>
+                <span class="nav-tab-badge groups-nav-badge" id="groupsNavBadge" style="display: none;">0</span>
+              </div>
+              <span>Groups</span>
             </button>
             <button type="button" class="nav-tab" id="tabNavRequests">
               <div class="nav-tab-icon-wrapper">
@@ -401,6 +440,9 @@
                 </div>
               </div>
               <div class="storage-actions">
+                <button type="button" class="btn btn-outline btn-sm" id="btnClearCache">
+                  <i data-feather="refresh-cw"></i> Clear App Cache
+                </button>
                 <button type="button" class="btn btn-outline btn-sm" id="btnClearMedia">
                   <i data-feather="trash-2"></i> Clear Cached Media
                 </button>
@@ -496,7 +538,50 @@
       </div>
     </div>
 
-    <!-- 6. CUSTOM GLASSMORPHIC CONFIRMATION MODAL (Replaces native browser confirm) -->
+    <!-- 6. CREATE GROUP MODAL -->
+    <div id="createGroupModal" class="modal-overlay">
+      <div class="modal-card glass-panel" style="max-width: 480px;">
+        <div class="modal-header">
+          <div class="modal-title">
+            <i data-feather="users" class="modal-title-icon"></i>
+            <h3>Create E2EE Group</h3>
+          </div>
+          <button type="button" class="icon-btn modal-close-btn" id="btnCloseCreateGroupModal">
+            <i data-feather="x"></i>
+          </button>
+        </div>
+        <div class="modal-body" style="padding: 20px;">
+          <form id="createGroupForm">
+            <div class="form-group">
+              <label for="groupNameInput">Group Name</label>
+              <div class="input-wrapper">
+                <i data-feather="users" class="input-icon"></i>
+                <input type="text" id="groupNameInput" placeholder="e.g., Project Alpha" required autocomplete="off">
+              </div>
+            </div>
+
+            <div class="form-group" style="margin-top: 16px;">
+              <label style="display: flex; justify-content: space-between; align-items: center;">
+                <span>Select Group Members</span>
+                <span style="font-size: 11px; text-transform: none; color: var(--text-muted);" id="selectedMembersCount">0 selected</span>
+              </label>
+              <div class="group-checklist-container" id="groupMembersChecklist">
+                <!-- Connected contacts checkboxes populate dynamically -->
+              </div>
+            </div>
+
+            <div class="modal-footer-actions" style="margin-top: 24px; display: flex; gap: 12px; justify-content: flex-end;">
+              <button type="button" class="btn btn-outline" id="btnCancelCreateGroup">Cancel</button>
+              <button type="submit" class="btn btn-primary" id="btnSubmitCreateGroup">
+                <i data-feather="check"></i> Create Group
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- 7. CUSTOM GLASSMORPHIC CONFIRMATION MODAL (Replaces native browser confirm) -->
     <div id="customConfirmModal" class="modal-overlay">
       <div class="confirm-modal-card">
         <div class="confirm-modal-icon-wrapper" id="confirmModalIconWrapper">

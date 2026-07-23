@@ -7,12 +7,14 @@ const state = {
   socket: null,
   reconnectAttempts: 0,
   activeChatPartner: null, // username string
-  activeSidebarTab: 'home', // 'home' | 'requests'
+  activeGroup: null, // group object or null
+  activeSidebarTab: 'home', // 'home' | 'groups' | 'requests'
   selectedChats: new Set(),
   selectedRequests: new Set(),
   isChatsSelectionMode: false,
   isRequestsSelectionMode: false,
   chats: [], // [{ username, email, deviceKeys: [{device_id, public_key}], unreadCount, status }]
+  groups: [], // [{ id, name, members: [usernames], createdBy, createdAt, unreadCount }]
   messages: [], // [{ id, chatPartner, sender, body, timestamp, media: { url, filename, type, size }, status }]
   outbox: [], // Pending messages queue for low internet resilience
   typingTimer: null,
@@ -567,10 +569,13 @@ function loadStateFromLocalStorage() {
     };
   }
 
-  // Load user-scoped chat logs & message records
+  // Load user-scoped chat logs, groups & message records
   const userId = state.user?.id || 'guest';
   const chats = localStorage.getItem(`ichat_chats_${userId}`) || localStorage.getItem('ichat_chats');
   state.chats = chats ? JSON.parse(chats) : [];
+
+  const storedGroups = localStorage.getItem(`ichat_groups_${userId}`);
+  state.groups = storedGroups ? JSON.parse(storedGroups) : [];
 
   const msgs = localStorage.getItem(`ichat_messages_${userId}`) || localStorage.getItem('ichat_messages');
   state.messages = msgs ? JSON.parse(msgs) : [];
@@ -586,6 +591,7 @@ function loadStateFromLocalStorage() {
 function saveStateToLocalStorage() {
   const userId = state.user?.id || 'guest';
   localStorage.setItem(`ichat_chats_${userId}`, JSON.stringify(state.chats));
+  localStorage.setItem(`ichat_groups_${userId}`, JSON.stringify(state.groups));
   localStorage.setItem(`ichat_messages_${userId}`, JSON.stringify(state.messages));
   localStorage.setItem('ichat_outbox', JSON.stringify(state.outbox));
 }
@@ -726,6 +732,10 @@ function sendTypingIndicator(recipientUsername, isTyping) {
 
 // Sending E2EE messages
 async function sendE2EEMessage(recipientUsername, bodyText, mediaData = null) {
+  if (state.activeGroup) {
+    return sendE2EEGroupMessage(state.activeGroup, bodyText, mediaData);
+  }
+
   const timestamp = new Date().toISOString();
   const messageId = 'msg-' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
 
@@ -844,6 +854,107 @@ async function sendE2EEMessage(recipientUsername, bodyText, mediaData = null) {
   }
 }
 
+// Send E2EE message to a Group Chat
+async function sendE2EEGroupMessage(group, bodyText, mediaData = null) {
+  const timestamp = new Date().toISOString();
+  const messageId = 'msg-' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+
+  const otherMembers = group.members.filter(m => m !== state.user.username);
+
+  // Generate 256-bit symmetric session key for group payload
+  const sessionKey = nacl.randomBytes(32);
+  const content = encryptSymmetric(bodyText || '', sessionKey);
+  const nonceBytes = decodeBase64(content.nonce);
+
+  const keysMap = {};
+
+  // Fetch device keys for all other members in the group
+  for (const member of otherMembers) {
+    try {
+      const res = await fetch(`${API_BASE}/api/users/keys?username=${member}`, {
+        headers: { 'Authorization': `Bearer ${state.token}` }
+      });
+      const result = await res.json();
+      if (result.success && result.recipient_devices) {
+        for (const dev of result.recipient_devices) {
+          const devPub = decodeBase64(dev.public_key);
+          const encKey = encryptAsymmetric(devPub, state.keys.privateKey, sessionKey, nonceBytes);
+          keysMap[dev.device_id] = encKey;
+        }
+      }
+    } catch (e) {
+      console.warn(`[GROUP E2EE] Device keys fetch failed for ${member}:`, e);
+    }
+  }
+
+  // Also encrypt session key for my own OTHER registered devices
+  try {
+    const myRes = await fetch(`${API_BASE}/api/users/keys?username=${state.user.username}`, {
+      headers: { 'Authorization': `Bearer ${state.token}` }
+    });
+    const myResult = await myRes.json();
+    if (myResult.success && myResult.sender_other_devices) {
+      for (const dev of myResult.sender_other_devices) {
+        const devPub = decodeBase64(dev.public_key);
+        const encKey = encryptAsymmetric(devPub, state.keys.privateKey, sessionKey, nonceBytes);
+        keysMap[dev.device_id] = encKey;
+      }
+    }
+  } catch (e) {}
+
+  const payload = {
+    encryptedBody: content.ciphertext,
+    nonce: content.nonce
+  };
+
+  const groupPacket = {
+    type: 'group_message',
+    messageId,
+    groupId: group.id,
+    groupName: group.name,
+    members: group.members,
+    sender: state.user.username,
+    keys: keysMap,
+    payload: JSON.stringify(payload),
+    timestamp,
+    media: mediaData
+  };
+
+  // Local log
+  const localMsgObj = {
+    id: messageId,
+    chatPartner: group.id,
+    sender: state.user.username,
+    body: bodyText,
+    timestamp,
+    media: mediaData ? {
+      url: mediaData.url,
+      filename: mediaData.filename,
+      type: mediaData.type,
+      size: mediaData.size
+    } : null,
+    status: 'delivered'
+  };
+
+  state.messages.push(localMsgObj);
+  saveStateToLocalStorage();
+  renderActiveChat();
+  renderGroupsList();
+
+  // Dispatch to each group member
+  for (const member of otherMembers) {
+    if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+      state.socket.send(JSON.stringify({ ...groupPacket, recipient: member }));
+    } else {
+      try {
+        await apiCall('/api/messages', 'POST', { recipient: member, packet: groupPacket });
+      } catch (e) {
+        console.warn(`[GROUP QUEUE] Failed queue to ${member}:`, e);
+      }
+    }
+  }
+}
+
 // Poll transient queue for incoming messages when WebSocket is offline or in serverless environments
 async function pollTransientQueue() {
   if (!state.token) return;
@@ -878,7 +989,7 @@ function flushOutboxQueue() {
 
 // Decrypting incoming messages
 async function handleIncomingMessage(data) {
-  // 0. Handle Chat Request Accepted signal
+  // 0A. Handle Chat Request Accepted signal
   if (data.type === 'request-accepted') {
     const partner = data.sender;
     let chatItem = state.chats.find(c => c && c.username === partner);
@@ -894,9 +1005,22 @@ async function handleIncomingMessage(data) {
     return;
   }
 
-  const { messageId, sender, recipient, keys, key, payload, timestamp, media, isSenderSync } = data;
-  const partner = isSenderSync ? recipient : sender;
+  // 0B. Handle Group Created Notification
+  if (data.type === 'group_created' && data.group) {
+    if (!state.groups.some(g => g.id === data.group.id)) {
+      state.groups.push(data.group);
+      saveStateToLocalStorage();
+      renderGroupsList();
+      showToast(`Added to group "${data.group.name}"!`, 'info');
+    }
+    return;
+  }
 
+  // 0C. Handle Group Message
+  const isGroupMsg = data.type === 'group_message' || !!data.groupId;
+  const { messageId, sender, recipient, keys, key, payload, timestamp, media, isSenderSync, groupId, groupName, members } = data;
+  
+  const partner = isGroupMsg ? groupId : (isSenderSync ? recipient : sender);
   if (!partner) return;
 
   // Prevent duplicate logs
@@ -966,7 +1090,6 @@ async function handleIncomingMessage(data) {
         filename: media.filename,
         type: media.type,
         size: media.size,
-        // Preserve decryption keys locally for the media file itself
         encryptedKey: media.encryptedKeyBase64,
         mediaNonce: media.mediaNonceBase64
       } : null,
@@ -975,35 +1098,59 @@ async function handleIncomingMessage(data) {
 
     state.messages.push(newMsgObj);
     
-    // Add to chats list if new
-    let chatItem = state.chats.find(c => c.username === partner);
-    if (!chatItem) {
-      chatItem = {
-        username: partner,
-        email: '',
-        status: isSenderSync ? 'accepted' : 'pending_incoming',
-        unreadCount: 0
-      };
-      state.chats.push(chatItem);
-    }
+    if (isGroupMsg) {
+      // Auto-create group locally if not already registered
+      let groupItem = state.groups.find(g => g.id === groupId);
+      if (!groupItem) {
+        groupItem = {
+          id: groupId,
+          name: groupName || 'Group Chat',
+          members: members || [sender, state.user.username],
+          createdBy: sender,
+          createdAt: timestamp,
+          unreadCount: 0
+        };
+        state.groups.push(groupItem);
+      }
 
-    // Increment unread count if not currently viewing
-    if (state.activeChatPartner !== partner) {
-      if (chatItem) chatItem.unreadCount = (chatItem.unreadCount || 0) + 1;
+      if (!state.activeGroup || state.activeGroup.id !== groupId) {
+        groupItem.unreadCount = (groupItem.unreadCount || 0) + 1;
+      }
+
+      saveStateToLocalStorage();
+      renderGroupsList();
+      renderActiveChat();
     } else {
-      // Currently active, send read receipt automatically
-      sendReadAcknowledgement(messageId, sender);
-      newMsgObj.status = 'read';
-    }
+      // 1-on-1 Chat
+      let chatItem = state.chats.find(c => c.username === partner);
+      if (!chatItem) {
+        chatItem = {
+          username: partner,
+          email: '',
+          status: isSenderSync ? 'accepted' : 'pending_incoming',
+          unreadCount: 0
+        };
+        state.chats.push(chatItem);
+      }
 
-    saveStateToLocalStorage();
-    renderChatList();
-    renderRequestsList();
-    renderActiveChat();
+      // Increment unread count if not currently viewing
+      if (state.activeChatPartner !== partner) {
+        if (chatItem) chatItem.unreadCount = (chatItem.unreadCount || 0) + 1;
+      } else {
+        // Currently active, send read receipt automatically
+        sendReadAcknowledgement(messageId, sender);
+        newMsgObj.status = 'read';
+      }
 
-    // Trigger double check delivery ack back to sender (skip for self syncs)
-    if (!isSenderSync) {
-      sendDeliveryAcknowledgement(messageId, sender);
+      saveStateToLocalStorage();
+      renderChatList();
+      renderRequestsList();
+      renderActiveChat();
+
+      // Trigger double check delivery ack back to sender (skip for self syncs)
+      if (!isSenderSync) {
+        sendDeliveryAcknowledgement(messageId, sender);
+      }
     }
 
   } catch (error) {
@@ -1998,10 +2145,268 @@ function renderChatList() {
   feather.replace();
 }
 
-// Conversation views renderer
+/* ═══════════ GROUPS & 3-TAB SIDEBAR CONTROLLERS ═══════════ */
+function switchSidebarTab(tabName) {
+  state.activeSidebarTab = tabName;
+  
+  const tabHome = document.getElementById('tabNavHome');
+  const tabGroups = document.getElementById('tabNavGroups');
+  const tabRequests = document.getElementById('tabNavRequests');
+
+  const viewChats = document.getElementById('chatsView');
+  const viewGroups = document.getElementById('groupsView');
+  const viewRequests = document.getElementById('requestsView');
+
+  [tabHome, tabGroups, tabRequests].forEach(t => t?.classList.remove('active'));
+  [viewChats, viewGroups, viewRequests].forEach(v => v?.classList.remove('active'));
+
+  if (tabName === 'home') {
+    tabHome?.classList.add('active');
+    viewChats?.classList.add('active');
+    renderChatList();
+  } else if (tabName === 'groups') {
+    tabGroups?.classList.add('active');
+    viewGroups?.classList.add('active');
+    renderGroupsList();
+  } else if (tabName === 'requests') {
+    tabRequests?.classList.add('active');
+    viewRequests?.classList.add('active');
+    renderRequestsList();
+  }
+}
+
+function openCreateGroupModal() {
+  const modal = document.getElementById('createGroupModal');
+  const checklist = document.getElementById('groupMembersChecklist');
+  const countEl = document.getElementById('selectedMembersCount');
+  const nameInput = document.getElementById('groupNameInput');
+  
+  if (nameInput) nameInput.value = '';
+  if (countEl) countEl.innerText = '0 selected';
+  if (!checklist) return;
+  checklist.innerHTML = '';
+
+  // Get connected/accepted contacts
+  const connectedContacts = state.chats.filter(c => c && (c.status === 'accepted' || c.status === 'pending_outgoing' || !c.status));
+
+  if (connectedContacts.length === 0) {
+    checklist.innerHTML = `
+      <div style="padding: 12px; font-size: 12px; color: var(--text-muted); text-align: center;">
+        No connected contacts available. Start a 1-on-1 chat first!
+      </div>
+    `;
+  } else {
+    connectedContacts.forEach(c => {
+      const item = document.createElement('label');
+      item.className = 'group-checklist-item';
+      
+      const avatarInitial = (c.username || 'C').substring(0, 2).toUpperCase();
+
+      item.innerHTML = `
+        <input type="checkbox" value="${c.username}">
+        <div class="group-checklist-avatar">${avatarInitial}</div>
+        <div class="group-checklist-info">@${c.username}</div>
+      `;
+
+      item.querySelector('input').addEventListener('change', () => {
+        const selected = checklist.querySelectorAll('input[type="checkbox"]:checked');
+        if (countEl) countEl.innerText = `${selected.length} selected`;
+      });
+
+      checklist.appendChild(item);
+    });
+  }
+
+  modal?.classList.add('active');
+}
+
+function closeCreateGroupModal() {
+  document.getElementById('createGroupModal')?.classList.remove('active');
+}
+
+async function executeCreateGroup(groupName, selectedMemberUsernames) {
+  if (!groupName || groupName.trim() === '') {
+    showToast('Please enter a group name', 'error');
+    return;
+  }
+  if (!selectedMemberUsernames || selectedMemberUsernames.length === 0) {
+    showToast('Please select at least one contact to join the group', 'error');
+    return;
+  }
+
+  const groupId = 'group-' + Math.random().toString(36).substring(2, 15);
+  const allMembers = Array.from(new Set([state.user.username, ...selectedMemberUsernames]));
+
+  const newGroup = {
+    id: groupId,
+    name: groupName.trim(),
+    members: allMembers,
+    createdBy: state.user.username,
+    createdAt: new Date().toISOString(),
+    unreadCount: 0
+  };
+
+  state.groups.push(newGroup);
+  saveStateToLocalStorage();
+  closeCreateGroupModal();
+  switchSidebarTab('groups');
+  renderGroupsList();
+
+  // Send group creation notification to member devices
+  const groupInitPacket = {
+    type: 'group_created',
+    group: newGroup
+  };
+
+  for (const member of selectedMemberUsernames) {
+    try {
+      if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+        state.socket.send(JSON.stringify({
+          ...groupInitPacket,
+          recipient: member
+        }));
+      } else {
+        await apiCall('/api/messages', 'POST', {
+          recipient: member,
+          packet: groupInitPacket
+        });
+      }
+    } catch (e) {
+      console.warn(`[GROUP] Failed to notify ${member} of group creation:`, e);
+    }
+  }
+
+  openGroupConversation(groupId);
+  showToast(`Group "${newGroup.name}" created!`, 'success');
+}
+
+function renderGroupsList() {
+  const container = document.getElementById('groupsContainer');
+  const countBadge = document.getElementById('groupsCountBadge');
+  const navBadge = document.getElementById('groupsNavBadge');
+  const searchVal = (document.getElementById('groupSearchInput')?.value || '').toLowerCase().trim();
+
+  if (!container) return;
+  container.innerHTML = '';
+
+  const filteredGroups = state.groups.filter(g => g && g.name && g.name.toLowerCase().includes(searchVal));
+
+  if (countBadge) countBadge.innerText = state.groups.length;
+
+  const totalUnread = state.groups.reduce((acc, g) => acc + (g.unreadCount || 0), 0);
+  if (navBadge) {
+    if (totalUnread > 0) {
+      navBadge.innerText = totalUnread > 99 ? '99+' : totalUnread;
+      navBadge.style.display = 'inline-flex';
+    } else {
+      navBadge.style.display = 'none';
+    }
+  }
+
+  if (filteredGroups.length === 0) {
+    container.innerHTML = `
+      <div class="chat-list-empty">
+        <i data-feather="users" class="empty-icon"></i>
+        <p>${searchVal ? 'No matching group chats' : 'No group chats yet.'}</p>
+        <span>${searchVal ? 'Try a different search term' : 'Click "+ New Group" above to start one!'}</span>
+      </div>
+    `;
+    feather.replace();
+    return;
+  }
+
+  filteredGroups.forEach(group => {
+    const lastMsg = state.messages.filter(m => m.chatPartner === group.id).slice(-1)[0];
+    const displayMsg = lastMsg 
+      ? `${lastMsg.sender === state.user?.username ? 'You' : '@' + lastMsg.sender}: ${lastMsg.media ? '📷 File' : lastMsg.body}`
+      : 'No messages yet';
+    const displayTime = lastMsg 
+      ? new Date(lastMsg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+      : '';
+
+    const avatarInitial = (group.name || 'G').substring(0, 2).toUpperCase();
+
+    const item = document.createElement('div');
+    item.className = `group-item ${state.activeGroup && state.activeGroup.id === group.id ? 'active' : ''}`;
+
+    item.innerHTML = `
+      <div class="group-item-avatar">${avatarInitial}</div>
+      <div class="group-item-info">
+        <div class="group-item-header">
+          <h4>${group.name}</h4>
+          <span class="chat-item-time">${displayTime}</span>
+        </div>
+        <div class="group-item-body" style="display: flex; justify-content: space-between; align-items: center;">
+          <p class="group-item-members">${displayMsg}</p>
+          ${group.unreadCount > 0 ? `<span class="chat-item-badge">${group.unreadCount}</span>` : ''}
+        </div>
+      </div>
+    `;
+
+    item.addEventListener('click', () => {
+      group.unreadCount = 0;
+      saveStateToLocalStorage();
+      openGroupConversation(group.id);
+    });
+
+    container.appendChild(item);
+  });
+
+  feather.replace();
+}
+
+function openGroupConversation(groupId) {
+  const group = state.groups.find(g => g.id === groupId);
+  if (!group) return;
+
+  state.activeGroup = group;
+  state.activeChatPartner = null;
+  localStorage.setItem('ichat_active_group', groupId);
+  localStorage.removeItem('ichat_active_partner');
+
+  history.pushState({ view: 'group', groupId }, '');
+
+  const emptyState = document.getElementById('chatEmptyState');
+  if (emptyState) emptyState.classList.remove('active');
+
+  const chatPane = document.getElementById('chatPane');
+  if (chatPane) chatPane.classList.add('active');
+
+  const chatWin = document.getElementById('chatWindow');
+  if (chatWin) chatWin.classList.add('active');
+
+  const sidebar = document.getElementById('sidebar');
+  if (sidebar) sidebar.classList.add('inactive');
+
+  const titleUser = document.getElementById('chatTitleUsername');
+  if (titleUser) titleUser.innerText = group.name;
+
+  const titleAvatar = document.getElementById('chatTitleAvatar');
+  if (titleAvatar) titleAvatar.innerText = group.name.substring(0, 2).toUpperCase();
+
+  const typingText = document.getElementById('chatTitleTypingText');
+  if (typingText) typingText.style.display = 'none';
+
+  const statusText = document.getElementById('chatTitleStatusText');
+  if (statusText) {
+    statusText.className = 'status-online';
+    statusText.innerText = `Group • ${group.members.length} Members`;
+    statusText.style.display = 'inline';
+  }
+
+  group.unreadCount = 0;
+  saveStateToLocalStorage();
+
+  renderActiveChat();
+  renderGroupsList();
+}
+
+// Conversation views renderer (1-on-1)
 function openConversation(username) {
   state.activeChatPartner = username;
+  state.activeGroup = null;
   localStorage.setItem('ichat_active_partner', username);
+  localStorage.removeItem('ichat_active_group');
 
   // Push history state to enable back gesture / browser back button navigation
   history.pushState({ view: 'chat', partner: username }, '');
@@ -2048,17 +2453,18 @@ function openConversation(username) {
 }
 
 async function renderActiveChat() {
-  const history = document.getElementById('messageHistory');
-  const scrollAtBottom = history.scrollHeight - history.scrollTop <= history.clientHeight + 100;
+  const historyContainer = document.getElementById('messageHistory');
+  const scrollAtBottom = historyContainer.scrollHeight - historyContainer.scrollTop <= historyContainer.clientHeight + 100;
   
-  history.innerHTML = '';
+  historyContainer.innerHTML = '';
 
-  const activeMessages = state.messages.filter(m => m.chatPartner === state.activeChatPartner);
+  const activeTargetId = state.activeGroup ? state.activeGroup.id : state.activeChatPartner;
+  const activeMessages = state.messages.filter(m => m.chatPartner === activeTargetId);
 
   if (activeMessages.length === 0) {
-    history.innerHTML = `
+    historyContainer.innerHTML = `
       <div style="flex: 1; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 13px;">
-        <p><i data-feather="lock" style="width: 12px; height: 12px; vertical-align: middle;"></i> Messages are fully encrypted end-to-end.</p>
+        <p><i data-feather="lock" style="width: 12px; height: 12px; vertical-align: middle;"></i> ${state.activeGroup ? 'Group messages are end-to-end encrypted across all members.' : 'Messages are fully encrypted end-to-end.'}</p>
       </div>
     `;
     feather.replace();
@@ -2073,6 +2479,14 @@ async function renderActiveChat() {
 
     const bubble = document.createElement('div');
     bubble.className = 'message-bubble';
+
+    // Render Group Sender Tag for incoming group messages
+    if (state.activeGroup && !isOutgoing) {
+      const senderTag = document.createElement('span');
+      senderTag.className = 'group-sender-tag';
+      senderTag.innerText = `@${msg.sender}`;
+      bubble.appendChild(senderTag);
+    }
 
     // Renders attachments
     if (msg.media) {
@@ -2463,10 +2877,17 @@ function initDashboard() {
   if (themeSelect) themeSelect.value = state.theme;
 
   renderChatList();
+  renderGroupsList();
   
   // Restore active open conversation if preserved
   const savedPartner = localStorage.getItem('ichat_active_partner');
-  if (savedPartner && state.chats.some(c => c.username === savedPartner)) {
+  const savedGroup = localStorage.getItem('ichat_active_group');
+
+  if (savedGroup && state.groups.some(g => g.id === savedGroup)) {
+    switchSidebarTab('groups');
+    openGroupConversation(savedGroup);
+  } else if (savedPartner && state.chats.some(c => c.username === savedPartner)) {
+    switchSidebarTab('home');
     openConversation(savedPartner);
   }
 
@@ -2785,13 +3206,63 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('btnAcceptSelectedRequests')?.addEventListener('click', acceptSelectedRequests);
   document.getElementById('btnDeclineSelectedRequests')?.addEventListener('click', declineSelectedRequests);
 
-  // Bottom Sidebar Tabs Navigation
+  // Bottom Sidebar 3-Tab Navigation
   document.getElementById('tabNavHome')?.addEventListener('click', () => switchSidebarTab('home'));
+  document.getElementById('tabNavGroups')?.addEventListener('click', () => switchSidebarTab('groups'));
   document.getElementById('tabNavRequests')?.addEventListener('click', () => switchSidebarTab('requests'));
+
+  // Group Creation Triggers & Form Submit
+  document.getElementById('btnOpenCreateGroupModal')?.addEventListener('click', openCreateGroupModal);
+  document.getElementById('btnCreateGroupHeader')?.addEventListener('click', openCreateGroupModal);
+  document.getElementById('btnCloseCreateGroupModal')?.addEventListener('click', closeCreateGroupModal);
+  document.getElementById('btnCancelCreateGroup')?.addEventListener('click', closeCreateGroupModal);
+
+  document.getElementById('groupSearchInput')?.addEventListener('input', renderGroupsList);
+
+  document.getElementById('createGroupForm')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const name = document.getElementById('groupNameInput')?.value || '';
+    const checklist = document.getElementById('groupMembersChecklist');
+    const selectedBoxes = checklist ? checklist.querySelectorAll('input[type="checkbox"]:checked') : [];
+    const selectedUsernames = Array.from(selectedBoxes).map(cb => cb.value);
+    executeCreateGroup(name, selectedUsernames);
+  });
 
   // Requests Filter Search & Bulk Decline
   document.getElementById('requestSearchInput')?.addEventListener('input', renderRequestsList);
   document.getElementById('btnDeclineAllRequests')?.addEventListener('click', declineAllRequests);
+
+  // Settings: Clear App Cache
+  document.getElementById('btnClearCache')?.addEventListener('click', () => {
+    showConfirmModal({
+      title: 'Clear App Cache?',
+      message: 'This will clear temporary browser caches, local media cache, and storage data. Your account and chat messages will remain safe.',
+      icon: 'refresh-cw',
+      confirmText: 'Clear Cache',
+      cancelText: 'Cancel',
+      isDanger: false,
+      onConfirm: async () => {
+        state.localMediaCache.clear();
+        await clearMediaLocalDB();
+        
+        if ('caches' in window) {
+          try {
+            const keys = await caches.keys();
+            await Promise.all(keys.map(k => caches.delete(k)));
+          } catch (e) {
+            console.warn('[CACHE] CacheStorage clear error:', e);
+          }
+        }
+        
+        if (typeof onlineToastTracker !== 'undefined') onlineToastTracker.clear();
+        if (typeof readToastTracker !== 'undefined') readToastTracker.clear();
+
+        updateStorageStatsUI();
+        renderActiveChat();
+        showToast('App cache cleared successfully!', 'success');
+      }
+    });
+  });
 
   // Settings: Clear Cached Media files
   document.getElementById('btnClearMedia').addEventListener('click', () => {
