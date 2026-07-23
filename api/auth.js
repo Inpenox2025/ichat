@@ -188,6 +188,7 @@ module.exports = async function handler(req, res) {
         return res.status(404).json({ error: 'User not found' });
       }
 
+      
       const activeDevices = await sql`SELECT * FROM devices WHERE user_id = ${decoded.userId}`;
 
       // Update current device's active status and public_key if provided
