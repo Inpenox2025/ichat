@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   StyleSheet, Text, View, ScrollView, TextInput, TouchableOpacity,
-  Alert, ActivityIndicator, StatusBar, Platform
+  Alert, ActivityIndicator, StatusBar, Platform, Modal
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -17,6 +17,58 @@ if (Platform.OS !== 'web') {
   FileSystem = require('expo-file-system');
   Sharing = require('expo-sharing');
   DocumentPicker = require('expo-document-picker');
+}
+
+function CustomPopupModal({ visible, title, message, icon = 'information-circle-outline', type = 'info', confirmText = 'OK', cancelText, onConfirm, onClose, C }) {
+  if (!visible) return null;
+  const isDanger = type === 'danger';
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+        <View style={{ width: '100%', maxWidth: 360, backgroundColor: C.card, borderRadius: 20, borderWidth: 1, borderColor: isDanger ? 'rgba(239,68,68,0.4)' : C.border, padding: 24, alignItems: 'center' }}>
+          
+          {/* Icon Badge */}
+          <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: isDanger ? 'rgba(239,68,68,0.15)' : C.accentBg, justifyContent: 'center', alignItems: 'center', marginBottom: 16, borderWidth: 1, borderColor: isDanger ? 'rgba(239,68,68,0.3)' : C.accent }}>
+            <Ionicons name={icon} size={28} color={isDanger ? '#ef4444' : C.accent} />
+          </View>
+
+          {/* Title & Message */}
+          <Text style={{ fontSize: 18, fontWeight: '800', color: C.text, textAlign: 'center', marginBottom: 8 }}>{title}</Text>
+          <Text style={{ fontSize: 14, color: C.textMuted, textAlign: 'center', lineHeight: 20, marginBottom: 24 }}>{message}</Text>
+
+          {/* Action Buttons */}
+          <View style={{ flexDirection: 'row', gap: 12, width: '100%' }}>
+            {cancelText ? (
+              <TouchableOpacity
+                style={{ flex: 1, paddingVertical: 12, borderRadius: 12, backgroundColor: C.cardAlt, borderWidth: 1, borderColor: C.border, alignItems: 'center' }}
+                onPress={onClose}
+              >
+                <Text style={{ color: C.text, fontWeight: '700', fontSize: 14 }}>{cancelText}</Text>
+              </TouchableOpacity>
+            ) : null}
+
+            <TouchableOpacity
+              style={{
+                flex: 1, paddingVertical: 12, borderRadius: 12,
+                backgroundColor: isDanger ? '#ef4444' : C.accent,
+                alignItems: 'center'
+              }}
+              onPress={() => {
+                onClose();
+                if (onConfirm) onConfirm();
+              }}
+            >
+              <Text style={{ color: isDanger ? '#ffffff' : '#0c101a', fontWeight: '800', fontSize: 14 }}>
+                {confirmText}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+        </View>
+      </View>
+    </Modal>
+  );
 }
 
 function SectionHead({ icon, title, C }) {
@@ -50,6 +102,33 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
   const [backupSchedule, setBackupSchedule] = useState('never');
   const [backupStatusMsg, setBackupStatusMsg] = useState('');
   const [restoreStatusMsg, setRestoreStatusMsg] = useState('');
+
+  // Custom Popup Modal State
+  const [popup, setPopup] = useState({
+    visible: false,
+    title: '',
+    message: '',
+    icon: 'information-circle-outline',
+    type: 'info',
+    confirmText: 'OK',
+    cancelText: null,
+    onConfirm: null
+  });
+
+  const showPopup = (title, message, opts = {}) => {
+    setPopup({
+      visible: true,
+      title,
+      message,
+      icon: opts.icon || (opts.type === 'danger' ? 'warning-outline' : 'information-circle-outline'),
+      type: opts.type || 'info',
+      confirmText: opts.confirmText || 'OK',
+      cancelText: opts.cancelText || null,
+      onConfirm: opts.onConfirm || null
+    });
+  };
+
+  const closePopup = () => setPopup(prev => ({ ...prev, visible: false }));
 
   // Auto-dismiss success/error status messages after 4 seconds
   useEffect(() => {
@@ -322,85 +401,65 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
     finally { setActionLoading(null); }
   }
 
-  async function handleLogoutAllDevices() {
-    const doLogoutAll = async () => {
-      setActionLoading('logout-all');
-      try {
-        const res = await fetch(`${serverUrl}/api/auth/logout-all-devices?action=logout-all-devices`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({ action: 'logout-all-devices' })
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Failed to logout all devices');
-        if (Platform.OS === 'web') {
-          window.alert('All device sessions have been revoked.');
-        } else {
-          Alert.alert('Success', 'All device sessions have been revoked.');
+  function handleLogoutAllDevices() {
+    showPopup(
+      'Logout from All Devices?',
+      'This will revoke all active device sessions across all your devices. You will need to log in again.',
+      {
+        icon: 'log-out-outline',
+        type: 'danger',
+        confirmText: 'Logout All',
+        cancelText: 'Cancel',
+        onConfirm: async () => {
+          setActionLoading('logout-all');
+          try {
+            const res = await fetch(`${serverUrl}/api/auth/logout-all-devices?action=logout-all-devices`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+              },
+              body: JSON.stringify({ action: 'logout-all-devices' })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Failed to logout all devices');
+            await onLogout();
+          } catch (err) {
+            showPopup('Logout Failed', err.message, { type: 'danger' });
+          } finally {
+            setActionLoading(null);
+          }
         }
-        await onLogout();
-      } catch (err) {
-        if (Platform.OS === 'web') {
-          window.alert('Error: ' + err.message);
-        } else {
-          Alert.alert('Error', err.message);
-        }
-      } finally {
-        setActionLoading(null);
       }
-    };
-
-    if (Platform.OS === 'web') {
-      if (window.confirm('Logout from All Devices?\n\nThis signs you out from ALL devices. You will need to log in again.')) {
-        await doLogoutAll();
-      }
-    } else {
-      Alert.alert('Logout from All Devices', 'This signs you out from ALL devices. You will need to log in again.', [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Logout All', style: 'destructive', onPress: doLogoutAll }
-      ]);
-    }
+    );
   }
 
-  async function handleDeleteAccount() {
-    const doDelete = async () => {
-      setActionLoading('delete-account');
-      try {
-        const res = await fetch(`${serverUrl}/api/auth/delete-account`, {
-          method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Failed to delete account');
-        if (Platform.OS === 'web') {
-          window.alert('Account deleted.');
-        } else {
-          Alert.alert('Account Deleted', 'Your account has been deleted.');
+  function handleDeleteAccount() {
+    showPopup(
+      'Permanently Delete Account?',
+      'This will delete your account and all associated keys. This action CANNOT be undone.',
+      {
+        icon: 'trash-bin-outline',
+        type: 'danger',
+        confirmText: 'Delete Account',
+        cancelText: 'Cancel',
+        onConfirm: async () => {
+          setActionLoading('delete-account');
+          try {
+            const res = await fetch(`${serverUrl}/api/auth/delete-account`, {
+              method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Failed to delete account');
+            await onLogout();
+          } catch (err) {
+            showPopup('Deletion Failed', err.message, { type: 'danger' });
+          } finally {
+            setActionLoading(null);
+          }
         }
-        await onLogout();
-      } catch (err) {
-        if (Platform.OS === 'web') {
-          window.alert('Error: ' + err.message);
-        } else {
-          Alert.alert('Error', err.message);
-        }
-      } finally {
-        setActionLoading(null);
       }
-    };
-
-    if (Platform.OS === 'web') {
-      if (window.confirm('Permanently delete your account? This cannot be undone.')) {
-        await doDelete();
-      }
-    } else {
-      Alert.alert('Danger Zone', 'Permanently delete your account? This cannot be undone.', [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: doDelete }
-      ]);
-    }
+    );
   }
 
   const themeLabels = { system: 'System', light: 'Light', dark: 'Dark' };
@@ -615,6 +674,9 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
         </View>
 
       </ScrollView>
+
+      {/* ── CUSTOM POPUP MODAL (NO ALERTS) ── */}
+      <CustomPopupModal {...popup} onClose={closePopup} C={C} />
     </SafeAreaView>
   );
 }
