@@ -85,12 +85,17 @@ export async function presentLocalNotification({ title, body, data = {} }) {
   try {
     // 1. Mobile (Android / iOS)
     if (Platform.OS !== 'web') {
-      Vibration.vibrate([0, 150, 100, 150]);
+      try {
+        Vibration.vibrate([0, 150, 100, 150]);
+      } catch (e) {}
+      
       await Notifications.scheduleNotificationAsync({
         content: {
           title,
           body,
           sound: true,
+          priority: Notifications.AndroidNotificationPriority.HIGH,
+          channelId: 'default',
           categoryIdentifier: 'message', // Enables Mark as Read & Reply interactive buttons
           data,
         },

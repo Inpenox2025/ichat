@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   StyleSheet, Text, View, FlatList, TextInput, TouchableOpacity,
-  Alert, ActivityIndicator, Modal, ScrollView, StatusBar,
+  Alert, ActivityIndicator, Modal, ScrollView, StatusBar, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -49,11 +49,6 @@ export default function ChatListScreen({
 
   async function handleAddContact(contact) {
     setSearchQuery(''); setShowSearchDropdown(false);
-    const saved = [...chats];
-    if (!saved.some(c => c.username === contact.username)) {
-      saved.push({ username: contact.username, email: contact.email, unreadCount: 0 });
-      await AsyncStorage.setItem('ichat_chats', JSON.stringify(saved));
-    }
     onSelectChat(contact.username);
     navigation.navigate('Chat', { username: contact.username });
   }
@@ -71,6 +66,75 @@ export default function ChatListScreen({
     prev.includes(u) ? prev.filter(x => x !== u) : [...prev, u]);
   const toggleSelectGroup = (id) => setSelectedGroups(prev =>
     prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+
+  const confirmDeleteSelectedChats = () => {
+    if (selectedChats.length === 0) return;
+    const msg = `Delete ${selectedChats.length} selected conversation${selectedChats.length > 1 ? 's' : ''} and all message history?`;
+    if (Platform.OS === 'web') {
+      if (window.confirm(msg)) {
+        onDeleteSelectedChats(selectedChats);
+        setSelectedChats([]);
+      }
+      return;
+    }
+    Alert.alert('Delete Selected Chats', msg, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          onDeleteSelectedChats(selectedChats);
+          setSelectedChats([]);
+        }
+      }
+    ]);
+  };
+
+  const confirmExitSelectedGroups = () => {
+    if (selectedGroups.length === 0) return;
+    const msg = `Exit ${selectedGroups.length} selected group${selectedGroups.length > 1 ? 's' : ''}? You will no longer receive new messages.`;
+    if (Platform.OS === 'web') {
+      if (window.confirm(msg)) {
+        onExitSelectedGroups(selectedGroups);
+        setSelectedGroups([]);
+      }
+      return;
+    }
+    Alert.alert('Exit Selected Groups', msg, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Exit Groups',
+        style: 'destructive',
+        onPress: () => {
+          onExitSelectedGroups(selectedGroups);
+          setSelectedGroups([]);
+        }
+      }
+    ]);
+  };
+
+  const confirmDeleteSelectedGroups = () => {
+    if (selectedGroups.length === 0) return;
+    const msg = `Permanently delete ${selectedGroups.length} selected group${selectedGroups.length > 1 ? 's' : ''} and message logs?`;
+    if (Platform.OS === 'web') {
+      if (window.confirm(msg)) {
+        onDeleteSelectedGroups(selectedGroups);
+        setSelectedGroups([]);
+      }
+      return;
+    }
+    Alert.alert('Delete Selected Groups', msg, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete Groups',
+        style: 'destructive',
+        onPress: () => {
+          onDeleteSelectedGroups(selectedGroups);
+          setSelectedGroups([]);
+        }
+      }
+    ]);
+  };
 
   function getPartnerMessages(partnerId) {
     if (Array.isArray(messages)) {
@@ -225,7 +289,7 @@ export default function ChatListScreen({
                   <Text style={{ color: C.textMuted, fontWeight: '700', fontSize: 13 }}>✕ Cancel</Text>
                 </TouchableOpacity>
                 <Text style={{ color: C.text, fontWeight: '700', fontSize: 13 }}>{selectedChats.length} Selected</Text>
-                <TouchableOpacity style={{ backgroundColor: '#ef4444', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 }} onPress={() => { onDeleteSelectedChats(selectedChats); setSelectedChats([]); }}>
+                <TouchableOpacity style={{ backgroundColor: '#ef4444', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 }} onPress={confirmDeleteSelectedChats}>
                   <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>Delete</Text>
                 </TouchableOpacity>
               </View>
@@ -269,10 +333,10 @@ export default function ChatListScreen({
                 <TouchableOpacity onPress={() => setSelectedGroups([])}><Text style={{ color: C.textMuted, fontWeight: '700', fontSize: 13 }}>✕ Cancel</Text></TouchableOpacity>
                 <Text style={{ color: C.text, fontWeight: '700', fontSize: 13 }}>{selectedGroups.length} Selected</Text>
                 <View style={{ flexDirection: 'row', gap: 6 }}>
-                  <TouchableOpacity style={{ backgroundColor: 'rgba(245,158,11,0.2)', borderWidth: 1, borderColor: '#f59e0b', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 }} onPress={() => { onExitSelectedGroups(selectedGroups); setSelectedGroups([]); }}>
+                  <TouchableOpacity style={{ backgroundColor: 'rgba(245,158,11,0.2)', borderWidth: 1, borderColor: '#f59e0b', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 }} onPress={confirmExitSelectedGroups}>
                     <Text style={{ color: '#f59e0b', fontWeight: '700', fontSize: 12 }}>Exit</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={{ backgroundColor: '#ef4444', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 }} onPress={() => { onDeleteSelectedGroups(selectedGroups); setSelectedGroups([]); }}>
+                  <TouchableOpacity style={{ backgroundColor: '#ef4444', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 }} onPress={confirmDeleteSelectedGroups}>
                     <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>Delete</Text>
                   </TouchableOpacity>
                 </View>

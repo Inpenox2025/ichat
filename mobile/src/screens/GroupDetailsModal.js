@@ -6,7 +6,8 @@ import {
   TouchableOpacity,
   ScrollView,
   StyleSheet,
-  Alert
+  Alert,
+  Platform
 } from 'react-native';
 
 export default function GroupDetailsModal({
@@ -42,9 +43,18 @@ export default function GroupDetailsModal({
   };
 
   const handleExitPress = () => {
+    const title = `Exit Group "${group.name}"?`;
+    const msg = 'Are you sure you want to exit this group? You will no longer receive new messages.';
+    if (Platform.OS === 'web') {
+      if (window.confirm(`${title}\n${msg}`)) {
+        onClose();
+        onExitGroup(group.id);
+      }
+      return;
+    }
     Alert.alert(
-      `Exit Group "${group.name}"?`,
-      'Are you sure you want to exit this group? You will no longer receive new messages.',
+      title,
+      msg,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -60,9 +70,18 @@ export default function GroupDetailsModal({
   };
 
   const handleDeletePress = () => {
+    const title = `Delete Group "${group.name}"?`;
+    const msg = 'Are you sure you want to delete this group and all its message history?';
+    if (Platform.OS === 'web') {
+      if (window.confirm(`${title}\n${msg}`)) {
+        onClose();
+        onDeleteGroup(group.id);
+      }
+      return;
+    }
     Alert.alert(
-      `Delete Group "${group.name}"?`,
-      'Are you sure you want to delete this group and all its message history?',
+      title,
+      msg,
       [
         { text: 'Cancel', style: 'cancel' },
         {

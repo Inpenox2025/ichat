@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { SafeAreaView, Text, TouchableOpacity } from 'react-native';
+import { SafeAreaView, Text, TouchableOpacity, View, StyleSheet, Animated, ActivityIndicator, Platform } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Ionicons } from '@expo/vector-icons';
 import { ThemeProvider } from './src/context/ThemeContext';
 
 // Import Screens
@@ -22,6 +23,95 @@ import * as Notifications from 'expo-notifications';
 import { registerForPushNotificationsAsync, presentLocalNotification } from './src/services/notifications';
 
 const Stack = createNativeStackNavigator();
+
+function AnimatedLoadingScreen() {
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const useNative = Platform.OS !== 'web';
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 400,
+      useNativeDriver: useNative,
+    }).start();
+
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 1.12,
+          duration: 900,
+          useNativeDriver: useNative,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 1,
+          duration: 900,
+          useNativeDriver: useNative,
+        }),
+      ])
+    ).start();
+  }, []);
+
+  return (
+    <SafeAreaView style={loadingStyles.container}>
+      <StatusBar style="light" backgroundColor="#070a12" />
+      <Animated.View style={[loadingStyles.content, { opacity: fadeAnim }]}>
+        <Animated.View style={[loadingStyles.logoRing, { transform: [{ scale: pulseAnim }] }]}>
+          <Ionicons name="shield-checkmark" size={44} color="#00f2fe" />
+        </Animated.View>
+        <Text style={loadingStyles.title}>ichat</Text>
+        <Text style={loadingStyles.subtitle}>Securing End-to-End Workspace...</Text>
+        <View style={loadingStyles.spinnerWrapper}>
+          <ActivityIndicator size="small" color="#00f2fe" />
+        </View>
+      </Animated.View>
+    </SafeAreaView>
+  );
+}
+
+const loadingStyles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#070a12',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  content: {
+    alignItems: 'center',
+  },
+  logoRing: {
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+    backgroundColor: 'rgba(0, 242, 254, 0.08)',
+    borderWidth: 2,
+    borderColor: '#00f2fe',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+    shadowColor: '#00f2fe',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.4,
+    shadowRadius: 16,
+    elevation: 12,
+  },
+  title: {
+    color: '#ffffff',
+    fontWeight: '900',
+    fontSize: 30,
+    letterSpacing: 1.5,
+    marginBottom: 6,
+  },
+  subtitle: {
+    color: '#94a3b8',
+    fontSize: 13,
+    fontWeight: '500',
+    marginBottom: 20,
+  },
+  spinnerWrapper: {
+    marginTop: 4,
+  }
+});
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -482,18 +572,21 @@ export default function App() {
       }
 
       // Present local push notification if conversation is not currently open
-      if (!isSenderSync && sender !== current.user?.username) {
+      const displaySender = (sender || partner || '').replace(/^@/, '').trim();
+      const currentUsername = (current.user?.username || '').replace(/^@/, '').trim();
+
+      if (!isSenderSync && displaySender && displaySender.toLowerCase() !== currentUsername.toLowerCase()) {
         if (isGroup && current.activeGroup?.id !== groupId) {
           presentLocalNotification({
-            title: `${groupName || 'Group Chat'} • @${sender}`,
+            title: `${groupName || 'Group Chat'} • @${displaySender}`,
             body: decryptedBody || (media ? `📷 Sent attachment: ${media.filename}` : 'New encrypted message'),
-            data: { groupId }
+            data: { groupId, sender: displaySender }
           });
         } else if (!isGroup && current.activePartner !== partner) {
           presentLocalNotification({
-            title: `@${sender}`,
+            title: `@${displaySender}`,
             body: decryptedBody || (media ? `📷 Sent attachment: ${media.filename}` : 'New encrypted message'),
-            data: { username: partner }
+            data: { username: partner, sender: displaySender }
           });
         }
       }
@@ -749,6 +842,18 @@ export default function App() {
     const updatedMessages = [...current.messages, localMsgObj];
     setMessages(updatedMessages);
     await AsyncStorage.setItem('ichat_messages', JSON.stringify(updatedMessages));
+
+    setChats(prev => {
+      const idx = prev.findIndex(c => c.username === recipient);
+      let updated = [...prev];
+      if (idx === -1) {
+        updated.push({ username: recipient, email: '', status: 'accepted', unreadCount: 0 });
+      } else if (updated[idx].status !== 'accepted') {
+        updated[idx] = { ...updated[idx], status: 'accepted' };
+      }
+      AsyncStorage.setItem('ichat_chats', JSON.stringify(updated));
+      return updated;
+    });
   }
 
   // Create Group Handler
@@ -906,7 +1011,13 @@ export default function App() {
     setActivePartner(username);
     setActiveGroup(null);
     setChats(prev => {
-      const updated = prev.map(c => c.username === username ? { ...c, unreadCount: 0 } : c);
+      const idx = prev.findIndex(c => c.username === username);
+      let updated = [...prev];
+      if (idx === -1) {
+        updated.push({ username, email: '', status: 'accepted', unreadCount: 0 });
+      } else {
+        updated[idx] = { ...updated[idx], unreadCount: 0, status: 'accepted' };
+      }
       AsyncStorage.setItem('ichat_chats', JSON.stringify(updated));
       return updated;
     });
@@ -987,7 +1098,7 @@ export default function App() {
   }
 
   if (loading) {
-    return null;
+    return <AnimatedLoadingScreen />;
   }
 
   return (
@@ -1013,7 +1124,9 @@ export default function App() {
                 initialRouteName={initialRoute}
                 screenOptions={{
                   headerShown: false,
-                  contentStyle: { backgroundColor: 'transparent' }
+                  animation: 'slide_from_right',
+                  animationDuration: 220,
+                  contentStyle: { backgroundColor: '#090d16' }
                 }}
               >
               {/* Main chat list with custom 4-tab bottom nav */}
@@ -1080,7 +1193,13 @@ export default function App() {
               </Stack.Screen>
 
               {/* Call Screen overlay */}
-              <Stack.Screen name="Call">
+              <Stack.Screen 
+                name="Call"
+                options={{
+                  animation: 'slide_from_bottom',
+                  presentation: 'fullScreenModal'
+                }}
+              >
                 {(props) => (
                   <CallScreen
                     {...props}
