@@ -28,7 +28,7 @@ module.exports = async function handler(req, res) {
         return res.status(400).json({ error: 'Missing recipient or message packet' });
       }
 
-      const cleanRecipient = recipient.trim().toLowerCase();
+      const cleanRecipient = recipient.replace(/^@/, '').trim().toLowerCase();
 
       // Find recipient user
       const users = await sql`SELECT id FROM users WHERE username = ${cleanRecipient}`;

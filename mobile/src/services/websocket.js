@@ -177,15 +177,16 @@ export function sendSocketMessage(packet) {
       return true;
     }
 
-    // For acks, try HTTP too
-    if (packet.type === 'ack-delivered' || packet.type === 'ack-read') {
+    // For acks and call signaling, try HTTP too
+    if (['ack-delivered', 'ack-read', 'call-offer', 'call-answer', 'ice-candidate', 'call-hangup', 'call-busy', 'mute'].includes(packet.type)) {
+      const recipient = packet.recipient || packet.senderOfMessage;
       fetch(`${currentServerUrl}/api/messages`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${currentToken}`
         },
-        body: JSON.stringify({ recipient: packet.senderOfMessage, packet })
+        body: JSON.stringify({ recipient, packet })
       }).catch(() => {});
       return true;
     }

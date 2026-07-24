@@ -7,7 +7,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import { decodeBase64, encodeBase64, nacl } from '../services/crypto';
 
-export default function ChatScreen({ route, navigation, messages, onSendMessage, onSendReadReceipt, typingStatus, serverUrl, token, currentUsername, onOpenGroupDetails }) {
+export default function ChatScreen({ route, navigation, messages, onSendMessage, onSendReadReceipt, onLeaveChat, typingStatus, serverUrl, token, currentUsername, onOpenGroupDetails }) {
   const { username, isGroup, group } = route.params || {};
   const [text, setText] = useState('');
   const [typing, setTyping] = useState(false);
@@ -21,6 +21,13 @@ export default function ChatScreen({ route, navigation, messages, onSendMessage,
 
   // Filter messages for this chat partner/group
   const chatMessages = messages.filter(m => m.chatPartner === activeTargetId);
+
+  // Clear active target state on screen unmount
+  useEffect(() => {
+    return () => {
+      if (onLeaveChat) onLeaveChat();
+    };
+  }, []);
 
   // Mark all unread messages as read
   useEffect(() => {
@@ -267,7 +274,9 @@ export default function ChatScreen({ route, navigation, messages, onSendMessage,
             {isOutgoing && (
               <View style={styles.ticks}>
                 {item.status === 'pending' && <Ionicons name="time-outline" size={12} color="#718096" />}
-                {item.status === 'sent' && <Ionicons name="checkmark" size={12} color="#718096" />}
+                {(item.status === 'sent' || !item.status) && item.status !== 'pending' && item.status !== 'delivered' && item.status !== 'read' && (
+                  <Ionicons name="checkmark" size={12} color="#718096" />
+                )}
                 {item.status === 'delivered' && (
                   <View style={{flexDirection: 'row'}}><Ionicons name="checkmark" size={12} color="#a0aec0" /><Ionicons name="checkmark" size={12} color="#a0aec0" style={{marginLeft:-6}} /></View>
                 )}
@@ -291,7 +300,7 @@ export default function ChatScreen({ route, navigation, messages, onSendMessage,
       >
         {/* Header bar */}
         <View style={styles.header}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.navigate('MainHome')}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => { if (onLeaveChat) onLeaveChat(); navigation.canGoBack() ? navigation.goBack() : navigation.navigate('MainHome'); }}>
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
           

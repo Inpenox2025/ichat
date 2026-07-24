@@ -276,7 +276,16 @@ wss.on('connection', (ws) => {
                 timestamp: new Date().toISOString()
               });
               // Forward delivery check back to all sender's devices
-              const senderSet = userDevices.get(clientUser.username);
+              const cleanSenderName = (clientUser.username || '').replace(/^@/, '').trim().toLowerCase();
+              let senderSet = userDevices.get(cleanSenderName);
+              if (!senderSet) {
+                for (const [uname, devSet] of userDevices.entries()) {
+                  if (uname.toLowerCase() === cleanSenderName) {
+                    senderSet = devSet;
+                    break;
+                  }
+                }
+              }
               if (senderSet) {
                 for (const dId of senderSet) {
                   const sWs = clients.get(dId);
@@ -332,8 +341,19 @@ wss.on('connection', (ws) => {
         const { messageId, senderOfMessage } = data;
         const status = data.type === 'ack-delivered' ? 'delivered' : 'read';
 
+        const cleanSenderName = (senderOfMessage || '').replace(/^@/, '').trim().toLowerCase();
+
         // Forward this receipt to all devices of the original sender
-        const devices = userDevices.get(senderOfMessage);
+        let devices = userDevices.get(cleanSenderName);
+        if (!devices) {
+          for (const [uname, devSet] of userDevices.entries()) {
+            if (uname.toLowerCase() === cleanSenderName) {
+              devices = devSet;
+              break;
+            }
+          }
+        }
+
         if (devices) {
           const ackPayload = JSON.stringify({
             type: 'ack',

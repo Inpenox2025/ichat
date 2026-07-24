@@ -294,21 +294,31 @@ export default function App() {
         return;
       }
 
-      if (data.type === 'ack') {
-        const { messageId, status } = data;
-        setMessages(prev => {
-          const idx = prev.findIndex(m => m.id === messageId);
-          if (idx !== -1) {
-            const updated = [...prev];
-            const currentStatus = updated[idx].status;
-            if (status === 'read' || (status === 'delivered' && currentStatus !== 'read')) {
-              updated[idx] = { ...updated[idx], status };
-              AsyncStorage.setItem('ichat_messages', JSON.stringify(updated));
-              return updated;
+      if (data.type === 'ack' || data.type === 'ack-delivered' || data.type === 'ack-read') {
+        const messageId = data.messageId;
+        const newStatus = data.type === 'ack-delivered'
+          ? 'delivered'
+          : (data.type === 'ack-read' ? 'read' : data.status);
+
+        if (messageId && newStatus) {
+          const statusRank = { pending: 0, sent: 1, delivered: 2, read: 3 };
+          const newRank = statusRank[newStatus] ?? 0;
+
+          setMessages(prev => {
+            const idx = prev.findIndex(m => m.id === messageId);
+            if (idx !== -1) {
+              const currentStatus = prev[idx].status || 'pending';
+              const currentRank = statusRank[currentStatus] ?? 0;
+              if (newRank > currentRank) {
+                const updated = [...prev];
+                updated[idx] = { ...updated[idx], status: newStatus };
+                AsyncStorage.setItem('ichat_messages', JSON.stringify(updated));
+                return updated;
+              }
             }
-          }
-          return prev;
-        });
+            return prev;
+          });
+        }
         return;
       }
 
@@ -352,11 +362,22 @@ export default function App() {
     try {
       const sqlPayload = JSON.parse(payload);
       
-      const res = await fetch(`${current.serverUrl}/api/users/keys?username=${sender}`, {
-        headers: { 'Authorization': `Bearer ${current.token}` }
-      });
-      const result = await res.json();
-      if (!result.success) throw new Error(result.error);
+      let keysObj = keys;
+      if (typeof keysObj === 'string') {
+        try { keysObj = JSON.parse(keysObj); } catch (e) {}
+      }
+
+      const lookupUser = sender || partner;
+      let keyResult = { recipient_devices: [], sender_other_devices: [] };
+      if (lookupUser) {
+        try {
+          const res = await fetch(`${current.serverUrl}/api/users/keys?action=keys&username=${encodeURIComponent(lookupUser)}`, {
+            headers: { 'Authorization': `Bearer ${current.token}` }
+          });
+          const parsed = await res.json();
+          if (parsed.success) keyResult = parsed;
+        } catch (e) {}
+      }
 
       const myPriv = await AsyncStorage.getItem('ichat_identity_key_private');
       const myPrivBytes = decodeBase64(myPriv);
@@ -364,11 +385,11 @@ export default function App() {
 
       // Collect candidate encrypted keys
       const targetEncryptedKeys = [];
-      if (keys && typeof keys === 'object') {
-        if (myDeviceId && keys[myDeviceId]) {
-          targetEncryptedKeys.push(keys[myDeviceId]);
+      if (keysObj && typeof keysObj === 'object') {
+        if (myDeviceId && keysObj[myDeviceId]) {
+          targetEncryptedKeys.push(keysObj[myDeviceId]);
         }
-        Object.values(keys).forEach(k => {
+        Object.values(keysObj).forEach(k => {
           if (k && !targetEncryptedKeys.includes(k)) targetEncryptedKeys.push(k);
         });
       }
@@ -377,7 +398,7 @@ export default function App() {
       }
 
       let decryptedBody = '';
-      const allKnownDevices = [...(result.recipient_devices || []), ...(result.sender_other_devices || [])];
+      const allKnownDevices = [...(keyResult.recipient_devices || []), ...(keyResult.sender_other_devices || [])];
 
       for (const encSessionKey of targetEncryptedKeys) {
         for (const dev of allKnownDevices) {
@@ -445,7 +466,12 @@ export default function App() {
         const updatedChats = [...current.chats];
         const chatIdx = updatedChats.findIndex(c => c.username === partner);
         if (chatIdx === -1) {
-          updatedChats.push({ username: partner, email: '', unreadCount: current.activePartner === partner ? 0 : 1 });
+          updatedChats.push({
+            username: partner,
+            email: '',
+            status: isSenderSync ? 'accepted' : 'pending_incoming',
+            unreadCount: current.activePartner === partner ? 0 : 1
+          });
         } else if (current.activePartner !== partner) {
           updatedChats[chatIdx].unreadCount = (updatedChats[chatIdx].unreadCount || 0) + 1;
         }
@@ -470,11 +496,13 @@ export default function App() {
         }
       }
 
+      const cleanAckSender = (sender || partner || '').replace(/^@/, '').trim().toLowerCase();
+
       if (!isSenderSync && !isGroup) {
         sendSocketMessage({
           type: 'ack-delivered',
           messageId,
-          senderOfMessage: sender
+          senderOfMessage: cleanAckSender
         });
       }
 
@@ -482,7 +510,7 @@ export default function App() {
         sendSocketMessage({
           type: 'ack-read',
           messageId,
-          senderOfMessage: sender
+          senderOfMessage: cleanAckSender
         });
         newMsg.status = 'read';
         await AsyncStorage.setItem('ichat_messages', JSON.stringify(updatedMessages));
@@ -498,14 +526,28 @@ export default function App() {
     if (current.outbox.length === 0) return;
 
     const remainingOutbox = [...current.outbox];
+    let updatedMsgs = null;
+
     while (remainingOutbox.length > 0) {
       const packet = remainingOutbox[0];
       const sent = sendSocketMessage(packet);
       if (sent) {
         remainingOutbox.shift();
+        if (packet.messageId) {
+          if (!updatedMsgs) updatedMsgs = [...current.messages];
+          const idx = updatedMsgs.findIndex(m => m.id === packet.messageId);
+          if (idx !== -1 && updatedMsgs[idx].status === 'pending') {
+            updatedMsgs[idx] = { ...updatedMsgs[idx], status: 'sent' };
+          }
+        }
       } else {
         break;
       }
+    }
+
+    if (updatedMsgs) {
+      setMessages(updatedMsgs);
+      await AsyncStorage.setItem('ichat_messages', JSON.stringify(updatedMsgs));
     }
 
     setOutbox(remainingOutbox);
@@ -535,6 +577,28 @@ export default function App() {
             'Authorization': `Bearer ${current.token}`
           },
           body: JSON.stringify({ recipient: actionObj.recipient, packet })
+        }).catch(() => {});
+      }
+      return;
+    }
+
+    if (['call-offer', 'call-answer', 'ice-candidate', 'call-hangup', 'call-busy', 'mute'].includes(actionObj.type)) {
+      const cleanRecipient = (actionObj.recipient || '').replace(/^@/, '').trim().toLowerCase();
+      const packet = {
+        ...actionObj,
+        sender: current.user?.username || '',
+        recipient: cleanRecipient
+      };
+
+      const sent = sendSocketMessage(packet);
+      if (!sent && current.token && current.serverUrl) {
+        fetch(`${current.serverUrl}/api/messages`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${current.token}`
+          },
+          body: JSON.stringify({ recipient: cleanRecipient, packet })
         }).catch(() => {});
       }
       return;
@@ -657,6 +721,8 @@ export default function App() {
       media
     };
 
+    const sent = sendSocketMessage(messagePacket);
+
     const localMsgObj = {
       id: messageId,
       chatPartner: recipient,
@@ -669,19 +735,18 @@ export default function App() {
         type: media.type,
         size: media.size
       } : null,
-      status: 'pending'
+      status: sent ? 'sent' : 'pending'
     };
 
-    const updatedMessages = [...current.messages, localMsgObj];
-    setMessages(updatedMessages);
-    await AsyncStorage.setItem('ichat_messages', JSON.stringify(updatedMessages));
-
-    const sent = sendSocketMessage(messagePacket);
     if (!sent) {
       const updatedOutbox = [...current.outbox, messagePacket];
       setOutbox(updatedOutbox);
       await AsyncStorage.setItem('ichat_outbox', JSON.stringify(updatedOutbox));
     }
+
+    const updatedMessages = [...current.messages, localMsgObj];
+    setMessages(updatedMessages);
+    await AsyncStorage.setItem('ichat_messages', JSON.stringify(updatedMessages));
   }
 
   // Create Group Handler
@@ -811,10 +876,11 @@ export default function App() {
   };
 
   function handleSendReadReceipt(messageId, senderOfMessage) {
+    const cleanAckSender = (senderOfMessage || '').replace(/^@/, '').trim().toLowerCase();
     sendSocketMessage({
       type: 'ack-read',
       messageId,
-      senderOfMessage
+      senderOfMessage: cleanAckSender
     });
 
     setMessages(prev => {
@@ -827,6 +893,11 @@ export default function App() {
       }
       return prev;
     });
+  }
+
+  function handleLeaveChat() {
+    setActivePartner(null);
+    setActiveGroup(null);
   }
 
   async function handleSelectChat(username) {
@@ -993,6 +1064,7 @@ export default function App() {
                     messages={messages}
                     onSendMessage={handleSendMessage}
                     onSendReadReceipt={handleSendReadReceipt}
+                    onLeaveChat={handleLeaveChat}
                     typingStatus={typingPartner === props.route.params.username}
                     serverUrl={serverUrl}
                     token={token}

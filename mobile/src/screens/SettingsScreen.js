@@ -195,63 +195,175 @@ export default function SettingsScreen({ navigation, chats, messages, onRestoreC
     setChatStorageList(list);
   }
 
-  async function handleDeleteFile(chatUsername, msg) {
-    if (Platform.OS === 'web') { Alert.alert('Not available', 'File management is not available on web.'); return; }
-    Alert.alert('Delete File', `Delete "${msg.media.filename}" to free storage?`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => {
-        await FileSystem.deleteAsync(`${FileSystem.documentDirectory}${msg.media.filename}`, { idempotent: true });
-        const updated = messages.map(m => m.id === msg.id ? { ...m, body: `[Deleted: ${msg.media.filename}]`, media: null } : m);
-        await AsyncStorage.setItem('ichat_messages', JSON.stringify(updated));
-        onRestoreCompleted(chats, updated);
-      }}
-    ]);
-  }
-
-  async function handleDeleteSpecificChat(chatUsername) {
-    Alert.alert('Clear Chat Data', `Delete all messages for @${chatUsername}?`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Clear Chat', style: 'destructive', onPress: async () => {
-        if (Platform.OS !== 'web') {
-          const chatMsgs = messages.filter(m => m.chatPartner === chatUsername);
-          for (const m of chatMsgs) {
-            if (m.media) await FileSystem.deleteAsync(`${FileSystem.documentDirectory}${m.media.filename}`, { idempotent: true });
+  function handleDeleteFile(chatUsername, msg) {
+    if (Platform.OS === 'web') {
+      showPopup('Not Available', 'File management is not available on web.', { type: 'info' });
+      return;
+    }
+    showPopup(
+      'Delete Media File?',
+      `Delete "${msg.media.filename}" from local storage?`,
+      {
+        icon: 'document-text-outline',
+        type: 'danger',
+        confirmText: 'Delete File',
+        cancelText: 'Cancel',
+        onConfirm: async () => {
+          try {
+            if (FileSystem && msg.media && msg.media.filename) {
+              await FileSystem.deleteAsync(`${FileSystem.documentDirectory}${msg.media.filename}`, { idempotent: true });
+            }
+            const updated = messages.map(m => m.id === msg.id ? { ...m, body: `[Deleted: ${msg.media.filename}]`, media: null } : m);
+            await AsyncStorage.setItem('ichat_messages', JSON.stringify(updated));
+            if (onRestoreCompleted) onRestoreCompleted(chats, updated);
+            showPopup('File Deleted', `"${msg.media.filename}" has been deleted.`, { icon: 'checkmark-circle-outline' });
+          } catch (e) {
+            showPopup('Error', 'Failed to delete file.', { type: 'danger' });
           }
         }
-        const updated = messages.filter(m => m.chatPartner !== chatUsername);
-        await AsyncStorage.setItem('ichat_messages', JSON.stringify(updated));
-        onRestoreCompleted(chats, updated);
-      }}
-    ]);
+      }
+    );
   }
 
-  async function handleClearMedia() {
-    if (Platform.OS === 'web') { Alert.alert('Not available', 'Media cache management is not available on web.'); return; }
-    Alert.alert('Clear Media Cache', 'Delete all decrypted media from this phone? Message logs will be kept.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Clear', style: 'destructive', onPress: async () => {
-        try {
-          const files = await FileSystem.readDirectoryAsync(FileSystem.documentDirectory);
-          for (const f of files) await FileSystem.deleteAsync(`${FileSystem.documentDirectory}${f}`, { idempotent: true });
-          await calculateStorageSizes();
-          Alert.alert('Done', 'Media cache cleared.');
-        } catch (e) { Alert.alert('Error', 'Failed to clear media.'); }
-      }}
-    ]);
+  function handleDeleteSpecificChat(chatUsername) {
+    showPopup(
+      `Clear Data for @${chatUsername}?`,
+      `Delete all message history and stored media files for @${chatUsername}?`,
+      {
+        icon: 'trash-outline',
+        type: 'danger',
+        confirmText: 'Clear Chat',
+        cancelText: 'Cancel',
+        onConfirm: async () => {
+          try {
+            if (Platform.OS !== 'web' && FileSystem) {
+              const chatMsgs = messages.filter(m => m.chatPartner === chatUsername);
+              for (const m of chatMsgs) {
+                if (m.media && m.media.filename) {
+                  try {
+                    await FileSystem.deleteAsync(`${FileSystem.documentDirectory}${m.media.filename}`, { idempotent: true });
+                  } catch (e) {}
+                }
+              }
+            }
+            const updated = messages.filter(m => m.chatPartner !== chatUsername);
+            await AsyncStorage.setItem('ichat_messages', JSON.stringify(updated));
+            if (onRestoreCompleted) onRestoreCompleted(chats, updated);
+            showPopup('Chat Cleared', `Message history for @${chatUsername} has been deleted.`, { icon: 'checkmark-circle-outline' });
+          } catch (e) {
+            showPopup('Error', 'Failed to clear chat data.', { type: 'danger' });
+          }
+        }
+      }
+    );
   }
 
-  async function handleClearHistory() {
-    Alert.alert('Clear Chat History', 'Permanently delete all local chat logs and credentials?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Clear All', style: 'destructive', onPress: async () => {
-        await AsyncStorage.removeItem('ichat_chats');
-        await AsyncStorage.removeItem('ichat_messages');
-        const files = await FileSystem.readDirectoryAsync(FileSystem.documentDirectory);
-        for (const f of files) await FileSystem.deleteAsync(`${FileSystem.documentDirectory}${f}`, { idempotent: true });
-        onRestoreCompleted([], []);
-        Alert.alert('Wiped', 'Local databases cleared.');
-      }}
-    ]);
+  function handleClearMedia() {
+    if (Platform.OS === 'web') {
+      showPopup('Not Available', 'Media cache management is only available on native mobile devices.', { type: 'info' });
+      return;
+    }
+
+    showPopup(
+      'Clear Media Cache?',
+      'Delete all downloaded and cached photos, videos, and document files from this device? Your message history text logs will be preserved.',
+      {
+        icon: 'trash-bin-outline',
+        type: 'danger',
+        confirmText: 'Clear Cache',
+        cancelText: 'Cancel',
+        onConfirm: async () => {
+          setActionLoading('clear-media');
+          try {
+            if (FileSystem) {
+              const docDir = FileSystem.documentDirectory;
+              if (docDir) {
+                const files = await FileSystem.readDirectoryAsync(docDir);
+                for (const f of files) {
+                  try {
+                    await FileSystem.deleteAsync(`${docDir}${f}`, { idempotent: true });
+                  } catch (e) {}
+                }
+              }
+              const cacheDir = FileSystem.cacheDirectory;
+              if (cacheDir) {
+                const cacheFiles = await FileSystem.readDirectoryAsync(cacheDir);
+                for (const f of cacheFiles) {
+                  try {
+                    await FileSystem.deleteAsync(`${cacheDir}${f}`, { idempotent: true });
+                  } catch (e) {}
+                }
+              }
+            }
+            await calculateStorageSizes();
+            calculatePerChatStorage();
+            showPopup('Media Cleared', 'All downloaded and cached media files have been cleared from local storage.', { icon: 'checkmark-circle-outline', type: 'info' });
+          } catch (err) {
+            showPopup('Clear Failed', 'An error occurred while clearing media cache: ' + err.message, { type: 'danger' });
+          } finally {
+            setActionLoading(null);
+          }
+        }
+      }
+    );
+  }
+
+  function handleClearHistory() {
+    showPopup(
+      'Wipe Local History?',
+      'Permanently delete all local chat logs, groups, outbox messages, and downloaded media from this device? This action cannot be undone.',
+      {
+        icon: 'warning-outline',
+        type: 'danger',
+        confirmText: 'Wipe Everything',
+        cancelText: 'Cancel',
+        onConfirm: async () => {
+          setActionLoading('clear-history');
+          try {
+            await AsyncStorage.multiRemove([
+              'ichat_chats',
+              'ichat_messages',
+              'ichat_groups',
+              'ichat_outbox'
+            ]);
+
+            if (Platform.OS !== 'web' && FileSystem) {
+              const docDir = FileSystem.documentDirectory;
+              if (docDir) {
+                const files = await FileSystem.readDirectoryAsync(docDir);
+                for (const f of files) {
+                  try {
+                    await FileSystem.deleteAsync(`${docDir}${f}`, { idempotent: true });
+                  } catch (e) {}
+                }
+              }
+              const cacheDir = FileSystem.cacheDirectory;
+              if (cacheDir) {
+                const cacheFiles = await FileSystem.readDirectoryAsync(cacheDir);
+                for (const f of cacheFiles) {
+                  try {
+                    await FileSystem.deleteAsync(`${cacheDir}${f}`, { idempotent: true });
+                  } catch (e) {}
+                }
+              }
+            }
+
+            if (onRestoreCompleted) {
+              onRestoreCompleted([], []);
+            }
+
+            await calculateStorageSizes();
+            calculatePerChatStorage();
+
+            showPopup('History Wiped', 'All local chat history, groups, and cached files have been wiped.', { icon: 'checkmark-circle-outline', type: 'info' });
+          } catch (err) {
+            showPopup('Wipe Failed', 'An error occurred while wiping history: ' + err.message, { type: 'danger' });
+          } finally {
+            setActionLoading(null);
+          }
+        }
+      }
+    );
   }
 
   async function handleCloudBackup() {
