@@ -335,12 +335,14 @@ export default function App() {
       }
 
       if (data.type === 'call-answer') {
-        setCallState(prev => prev ? { ...prev, status: 'connected' } : null);
+        const callerPartner = data.sender || data.recipient;
+        setCallState({ partner: callerPartner, status: 'connected' });
         return;
       }
 
       if (data.type === 'call-hangup') {
-        setCallState(null);
+        const callerPartner = data.sender || data.recipient;
+        setCallState({ partner: callerPartner, status: 'disconnected' });
         return;
       }
     });
